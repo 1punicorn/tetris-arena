@@ -7,19 +7,19 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { RunConfigSchema, BenchConfigSchema } from '../core/run-config.js';
 import { safeError } from '../core/errors.js';
-import { baselines, loadProfiles, publicProfile, type Profile } from '../providers/config.js';
+import { baselines } from '../providers/config.js';
 import { discover } from '../providers/agents.js';
 import { csv } from './artifacts.js';
 import { Manager } from './manager.js';
+import { SettingsStore } from './settings-store.js';
+import { settingsApi } from './settings-api.js';
 
 export function createApp(
   manager: Manager,
-  initial: Profile[],
+  store: SettingsStore,
   port: number,
-  configFile = 'connections.local.json',
   access: AccessPolicy = createAccessPolicy(port),
 ) {
-  let profiles = initial;
   const app = new Hono();
   const authenticate = access.needsAuthentication
     ? basicAuth({
@@ -52,13 +52,21 @@ export function createApp(
     }
     await next();
   });
-  app.use(
-    '/api/*',
-    bodyLimit({ maxSize: 32768, onError: (c) => c.json({ error: 'request_too_large' }, 413) }),
+  app.use('/api/*', (c, next) =>
+    bodyLimit({
+      maxSize:
+        c.req.method === 'PUT' && /^\/api\/settings\/providers\/[^/]+\/models$/.test(c.req.path)
+          ? 262144
+          : 32768,
+      onError: (c) => c.json({ error: 'request_too_large' }, 413),
+    })(c, next),
   );
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
-    if (c.req.method === 'POST' && !c.req.header('content-type')?.startsWith('application/json'))
+    if (
+      ['POST', 'PUT', 'PATCH'].includes(c.req.method) &&
+      !c.req.header('content-type')?.startsWith('application/json')
+    )
       return c.json({ error: 'json_required' }, 415);
     await next();
   });
@@ -72,19 +80,14 @@ export function createApp(
       throw new Error('run_in_progress');
   };
   const verifyOverrides = (overrides: Record<string, string>) => {
-    if (Object.keys(overrides).some((id) => !profiles.some((p) => p.id === id)))
+    if (Object.keys(overrides).some((id) => !store.profiles().some((p) => p.id === id)))
       throw new Error('unknown_model_override');
   };
   app.get('/api/health', (c) => c.json({ ok: true, version: '0.1.0' }));
-  app.get('/api/connections', (c) => c.json([...baselines, ...profiles.map(publicProfile)]));
-  app.post('/api/connections/reload', async (c) => {
-    requireIdle();
-    profiles = await loadProfiles(configFile);
-    return c.json([...baselines, ...profiles.map(publicProfile)]);
-  });
+  app.route('/api/settings', settingsApi(store));
+  app.get('/api/connections', (c) => c.json([...baselines, ...store.publicModels()]));
   app.get('/api/connections/:id/models', async (c) => {
-    const profile = profiles.find((p) => p.id === c.req.param('id'));
-    if (!profile) return c.json({ error: 'unknown_connection' }, 404);
+    const profile = store.get(c.req.param('id'));
     return c.json(
       await discover(profile, AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(10000)])),
     );
@@ -100,6 +103,9 @@ export function createApp(
         pending.catch(() => {});
       };
       manager.on('state', send);
+      stream.onAbort(() => {
+        manager.off('state', send);
+      });
       send();
       try {
         while (!stream.aborted) {
@@ -115,13 +121,13 @@ export function createApp(
     requireIdle();
     const config = RunConfigSchema.parse(await c.req.json());
     verifyOverrides(config.modelOverrides);
-    return c.json(manager.start(config, profiles), 201);
+    return c.json(manager.start(config, store.profiles()), 201);
   });
   app.post('/api/bench', async (c) => {
     requireIdle();
     const config = BenchConfigSchema.parse(await c.req.json());
     verifyOverrides(config.run.modelOverrides);
-    return c.json(manager.bench(config, profiles), 201);
+    return c.json(manager.bench(config, store.profiles()), 201);
   });
   app.post('/api/pause', (c) => {
     manager.runner?.pause();
@@ -170,7 +176,15 @@ export function createApp(
               ].includes(error.message)
             ? error.message
             : safeError(error);
-    return c.json({ error: code }, code === 'run_in_progress' ? 409 : 400);
+    return c.json(
+      {
+        error: code,
+        ...(error instanceof z.ZodError
+          ? { fields: error.issues.map((issue) => issue.path.join('.')) }
+          : {}),
+      },
+      code === 'run_in_progress' ? 409 : 400,
+    );
   });
   return app;
 }

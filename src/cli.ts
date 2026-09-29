@@ -8,6 +8,7 @@ import { loadProfiles } from './providers/config.js';
 import { safeError } from './core/errors.js';
 import { Manager } from './server/manager.js';
 import { Artifacts, csv } from './server/artifacts.js';
+import { SettingsStore } from './server/settings-store.js';
 
 const { values } = parseArgs({
   options: {
@@ -32,6 +33,7 @@ const output = resolve(values.out ?? process.env.RESULTS_DIR ?? 'results');
 const manager = new Manager(new Artifacts(output));
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => manager.cancel());
 let failed = false;
+let settings: SettingsStore | undefined;
 const reported = new Set<string>();
 manager.on('state', (s) => {
   if (s?.status === 'finished' && !reported.has(s.id)) {
@@ -44,7 +46,11 @@ manager.on('state', (s) => {
 });
 try {
   const idle = once(manager, 'idle');
-  manager.bench(config, await loadProfiles(values.connections));
+  if (!values.connections) {
+    settings = new SettingsStore(process.env.SETTINGS_DB ?? 'data/settings.sqlite');
+    await settings.importLegacy(process.env.CONNECTIONS_FILE);
+  }
+  manager.bench(config, settings ? settings.profiles() : await loadProfiles(values.connections));
   await idle;
   if (manager.error) throw new Error(manager.error);
   const summaries = await manager.artifacts.list();
@@ -56,5 +62,6 @@ try {
   console.error(`Benchmark failed: ${safeError(error)}`);
 } finally {
   await manager.close();
+  settings?.close();
 }
 process.exitCode = failed ? 1 : 0;

@@ -4,11 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { loadProfiles } from '../providers/config.js';
 import { Manager } from './manager.js';
 import { Artifacts } from './artifacts.js';
 import { createApp } from './app.js';
 import { createAccessPolicy, REQUEST_VARY } from './access.js';
+import { SettingsStore } from './settings-store.js';
 
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -26,7 +26,9 @@ if (dev && access.publicHost)
   throw new Error('Use pnpm build and pnpm start for public deployment');
 const manager = new Manager(new Artifacts(process.env.RESULTS_DIR ?? 'results'));
 const config = process.env.CONNECTIONS_FILE ?? 'connections.local.json';
-const app = createApp(manager, await loadProfiles(config), port, config, access);
+const store = new SettingsStore(process.env.SETTINGS_DB ?? 'data/settings.sqlite');
+await store.importLegacy(config);
+const app = createApp(manager, store, port, access);
 const vite = dev
   ? await (
       await import('vite')
@@ -74,6 +76,7 @@ async function close() {
   server.close();
   server.closeAllConnections();
   await manager.close();
+  store.close();
   await vite?.close();
 }
 for (const signal of ['SIGINT', 'SIGTERM'])

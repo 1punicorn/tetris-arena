@@ -8,12 +8,16 @@ import { Artifacts, csv } from '../src/server/artifacts.js';
 import { createApp } from '../src/server/app.js';
 import { ProfileSchema } from '../src/providers/config.js';
 import { BenchConfigSchema, RunConfigSchema } from '../src/core/run-config.js';
+import { SettingsStore } from '../src/server/settings-store.js';
 const managers: Manager[] = [],
+  stores: SettingsStore[] = [],
   dirs: string[] = [];
 afterEach(async () => {
   for (const m of managers) await m.close();
+  for (const store of stores) store.close();
   for (const d of dirs) await rm(d, { recursive: true, force: true });
   managers.length = 0;
+  stores.length = 0;
   dirs.length = 0;
 });
 async function setup() {
@@ -21,7 +25,9 @@ async function setup() {
   dirs.push(dir);
   const manager = new Manager(new Artifacts(dir));
   managers.push(manager);
-  return { manager, dir, app: createApp(manager, [], 4317) };
+  const store = new SettingsStore(join(dir, 'settings.sqlite'));
+  stores.push(store);
+  return { manager, dir, store, app: createApp(manager, store, 4317) };
 }
 it('blocks hostile hosts, cross-origin requests, non-JSON writes and oversized requests', async () => {
   const { app } = await setup();
@@ -87,7 +93,7 @@ it('runs a paired batch and flushes every summary before reporting idle', async 
   expect(await manager.artifacts.list()).toHaveLength(2);
 });
 it('never exposes credentials or provider options in the public catalog', async () => {
-  const { manager } = await setup();
+  const { store, app } = await setup();
   const p = ProfileSchema.parse({
     id: 'private',
     name: 'Private',
@@ -95,12 +101,15 @@ it('never exposes credentials or provider options in the public catalog', async 
     baseURL: 'https://example.com/v1',
     model: 'model',
     apiKeyEnv: 'PRIVATE_KEY',
+    apiKey: 'stored-private-key',
     providerOptions: { compatible: { user: 'private-identity' } },
   });
-  const app = createApp(manager, [p], 4317);
+  const { id: _id, apiKeyEnv: _env, ...input } = p;
+  store.save(input);
   const response = await app.request('/api/connections', { headers: { host: '127.0.0.1:4317' } });
   const body = await response.text();
   expect(body).not.toContain('PRIVATE_KEY');
+  expect(body).not.toContain('stored-private-key');
   expect(body).not.toContain('private-identity');
   expect(body).not.toContain('baseURL');
 });
@@ -117,14 +126,14 @@ it('rejects duplicate connections/invalid mode without starting a request', asyn
 
 it('requires authentication for public routes, including SSE, without a spoofed local-host bypass', async () => {
   const { createAccessPolicy } = await import('../src/server/access.js');
-  const { manager } = await setup();
+  const { manager, store } = await setup();
   const password = 'test-password-only-123';
   const access = createAccessPolicy(4317, {
     publicOrigin: 'https://arena.example.com',
     username: 'owner',
     password,
   });
-  const app = createApp(manager, [], 4317, 'connections.local.json', access);
+  const app = createApp(manager, store, 4317, access);
   for (const path of ['/api/health', '/api/events', '/api/state', '/']) {
     const response = await app.request(path, { headers: { host: 'arena.example.com' } });
     expect(response.status).toBe(401);

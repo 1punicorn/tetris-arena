@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
+import { ModelError } from '../core/errors.js';
 
 export const ProfileSchema = z
   .object({
@@ -17,6 +18,7 @@ export const ProfileSchema = z
     ]),
     baseURL: z.string().url().optional(),
     model: z.string().min(1).max(256),
+    apiKey: z.string().min(1).max(8192).optional(),
     apiKeyEnv: z
       .string()
       .regex(/^[A-Z][A-Z0-9_]*$/)
@@ -34,6 +36,25 @@ export const ProfileSchema = z
   })
   .strict();
 export type Profile = z.infer<typeof ProfileSchema>;
+export const ConnectionInputSchema = ProfileSchema.omit({ id: true, apiKeyEnv: true }).extend({
+  clearApiKey: z.boolean().default(false),
+});
+export type ConnectionInput = z.infer<typeof ConnectionInputSchema>;
+export type EditableConnection = Omit<Profile, 'apiKey' | 'apiKeyEnv'> & {
+  hasApiKey: boolean;
+  credentialSource: 'saved' | 'environment' | 'none';
+};
+export function apiKeyFor(profile: Profile) {
+  return profile.apiKey ?? (profile.apiKeyEnv ? process.env[profile.apiKeyEnv] : undefined);
+}
+export function editableProfile(profile: Profile): EditableConnection {
+  const { apiKey, apiKeyEnv, ...visible } = profile;
+  return {
+    ...visible,
+    hasApiKey: !!apiKeyFor(profile),
+    credentialSource: apiKey ? 'saved' : apiKeyEnv ? 'environment' : 'none',
+  };
+}
 export const ConfigSchema = z.object({ connections: z.array(ProfileSchema).max(100) }).strict();
 export const baselines = [
   {
@@ -62,7 +83,7 @@ export function validateEndpoint(address: string) {
     url.search ||
     url.hash
   )
-    throw new Error('invalid_endpoint');
+    throw new ModelError('invalid_endpoint');
   const host = url.hostname;
   const local =
     host === 'localhost' ||
@@ -72,7 +93,7 @@ export function validateEndpoint(address: string) {
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     host.endsWith('.local');
-  if (url.protocol === 'http:' && !local) throw new Error('remote_endpoint_requires_https');
+  if (url.protocol === 'http:' && !local) throw new ModelError('remote_endpoint_requires_https');
   return url;
 }
 export async function loadProfiles(file = 'connections.local.json'): Promise<Profile[]> {
@@ -85,9 +106,13 @@ export async function loadProfiles(file = 'connections.local.json'): Promise<Pro
   }
   if (Buffer.byteLength(data) > 128 * 1024) throw new Error('configuration_too_large');
   const { connections } = ConfigSchema.parse(JSON.parse(data));
-  const ids = new Set<string>(baselines.map((b) => b.id));
+  validateProfiles(connections);
+  return connections;
+}
+export function validateProfiles(connections: Profile[]) {
+  const ids = new Set<string>([...baselines.map((b) => b.id), 'human', 'none']);
   for (const profile of connections) {
-    if (ids.has(profile.id)) throw new Error('duplicate_connection');
+    if (ids.has(profile.id)) throw new ModelError('duplicate_connection');
     ids.add(profile.id);
     if (profile.baseURL) validateEndpoint(profile.baseURL);
     if (
@@ -95,11 +120,10 @@ export async function loadProfiles(file = 'connections.local.json'): Promise<Pro
       profile.baseURL &&
       profile.baseURL !== 'https://openrouter.ai/api/v1'
     )
-      throw new Error('unsupported_decision_endpoint');
+      throw new ModelError('unsupported_decision_endpoint');
     if (profile.provider === 'openai-compatible' && !profile.baseURL)
-      throw new Error('missing_base_url');
+      throw new ModelError('missing_base_url');
   }
-  return connections;
 }
 export function publicProfile(p: Profile) {
   return {
@@ -110,7 +134,11 @@ export function publicProfile(p: Profile) {
     reasoning: p.reasoning,
     output: p.output,
     available:
-      (!p.apiKeyEnv || !!process.env[p.apiKeyEnv]) &&
+      (!(
+        p.apiKeyEnv ||
+        ['openrouter-decisions', 'openai', 'anthropic', 'google', 'azure'].includes(p.provider)
+      ) ||
+        !!apiKeyFor(p)) &&
       (p.provider === 'openrouter-decisions' || p.reasoning !== 'off' || p.reasoningOffSupported),
   };
 }

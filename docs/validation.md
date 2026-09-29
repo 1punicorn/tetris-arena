@@ -41,7 +41,23 @@ Using an operator-supplied OpenRouter key (not included in the repository), the 
 
 Each then completed two 2-turn decision matches against the heuristic baseline with swapped seats: 8 matches total, all 16 remote choices accepted and applied, no errors. An 8-second real-time Jev vs DeepSeek match completed with 12 and 5 placements respectively, 12 and 6 accepted responses, no provider failures, and 0 reported DeepSeek reasoning tokens. A final accepted response need not finish its movement before a time limit. These are connection and execution smoke tests, **not a model-quality ranking or a stable latency benchmark**.
 
-The full no-key default CLI benchmark also completed: 5 seeds × 2 seat orders, 10 finished matches, reproducible swapped outcomes. Automated checks include 86 unit/protocol/integration tests and 5 Chromium scenarios at this revision.
+The full no-key default CLI benchmark also completed: 5 seeds × 2 seat orders, 10 finished matches, reproducible swapped outcomes. Automated checks include 108 unit/protocol/integration tests and 9 Chromium scenarios at this revision.
+
+## Persistent model settings
+
+SQLite/API regressions cover connection creation, editing, duplication, deletion, key replacement/removal, credential redaction, owner-only database/WAL permissions, reopening the database and one-time legacy migration without resurrecting deleted profiles. A local HTTP fixture verifies that model discovery, a test decision and normal agent execution use the stored credential without an environment variable.
+
+Public anonymous deployments are tested for direct settings access without administrator registration, saved-key redaction, cross-origin write rejection and JSON requirements. Migration removes obsolete administrator credentials and setup-code files while preserving saved connections and legacy-import state. Existing whole-site Basic authentication remains covered separately.
+
+Provider/model regressions additionally cover a shared credential across multiple enabled models, key rotation, enable/disable without losing IDs or options, atomic rollback of invalid selections, cross-provider edit rejection and provider deletion cascades. A flat SQLite fixture migrates OpenRouter Chat and native Decisions profiles into one provider while preserving their protocols, IDs and options. Catalog fixtures cover OpenAI and compatible/local endpoints, paginated Anthropic/Gemini/OpenRouter lists, native Decisions detection, non-text capabilities, repeated cursors and safe HTTP errors.
+
+A Chromium workflow saves a provider key once, searches a 212-model catalog, enables multiple models, reloads, preserves the key, disables one model, runs a test decision, manually adds an ID and plays a one-turn match. The single/multiple dropdowns are searched and exercised with keyboard input. A 205-model mobile dropdown check verifies navigation beyond the initial rendered page without moving the document. Endpoint presets, Korean/mobile layout and light/dark rendered screenshots are checked. These requests use local protocol fixtures, not paid inference; adapter-wide live coverage remains limited to the connections documented above.
+
+For deployments serving `dist/web` directly, the latest production build was validated in `.runtime/provider-build` with `vite build --outDir .runtime/provider-build/web`, `tsc -p tsconfig.server.json --outDir .runtime/provider-build/server` and `E2E_SERVER_COMMAND='node .runtime/provider-build/server/server/main.js' pnpm test:e2e`, alongside formatting, type checking and the full unit suite. This avoids exposing a new browser bundle to an older live server during validation.
+
+On the deployed site, the upgrade preserved all four existing model IDs, credentials and per-model options under one OpenRouter connection. The live catalog returned 631 models, including 7 native Decisions models, without truncation. Public Chromium checks verified saved-model selection, catalog search, the arena dropdown and a 320px-wide viewport with no browser errors. This deployment verification did not make paid inference calls.
+
+The arena and benchmark selectors now omit heuristic and seeded-random baselines, which remain available through the API/CLI. Chromium verifies registered-model defaults, provider-only benchmark options and the empty-model state, including disabling model matches and switching away from human play in decision mode. Arena play tests use a local provider fixture; no paid model is needed. Each test run uses an isolated settings database and results directory.
 
 ## Line-clear policy regression
 

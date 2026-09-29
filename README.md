@@ -12,7 +12,7 @@ A local Tetris arena for comparing **decision models and LLMs** on the same assi
 - **Inspectable results:** latency, invalid responses, retries, stale decisions, attacks, clears, tokens and reported cost; JSON/JSONL, CSV and replay.
 - **No API key required to try it:** heuristic and seeded-random baselines are included.
 
-English and Korean UI. Both boards stay visible on mobile. No database, Python service, Hermes or hosted account is required.
+English and Korean UI. Both boards stay visible on mobile. Model settings are stored in a local SQLite file using Node’s built-in driver; no separate database server, Python service or hosted account is required.
 
 ## Quick start
 
@@ -35,68 +35,56 @@ pnpm build
 pnpm start
 ```
 
-Run these commands from the repository directory. Configuration, `.env` and `results/` are resolved there. `PORT`, `CONNECTIONS_FILE` and `RESULTS_DIR` can override the local defaults. The server binds to loopback by default. For an HTTPS domain and a persistent service, see [deployment](docs/deployment.md).
+Run these commands from the repository directory. Settings are saved to `data/settings.sqlite`; results go to `results/`. No `.env` file is needed for local use. Optional `PORT`, `SETTINGS_DB` and `RESULTS_DIR` change these defaults. The server binds to loopback by default. For an HTTPS domain and a persistent service, see [deployment](docs/deployment.md).
 
 ## Connect models
 
-```sh
-cp connections.example.json connections.local.json
-cp .env.example .env
-```
+Open **Settings** in the header:
 
-Keep only the connection profiles you need. Put keys in `.env`, enter the correct model/deployment IDs, and restart the server after changing environment variables. **Reload connections** in the UI reloads the JSON file between runs.
+1. Choose **Add provider**. Select OpenAI, Anthropic · Claude, Google · Gemini, OpenRouter, Ollama, vLLM, or a compatible/cloud provider.
+2. Enter an API key once. Known providers have editable default API URLs; compatible services accept your own URL.
+3. **Save & browse models** fetches the provider catalog. Search by name or ID, select the models you want, then **Apply models**.
+4. If a provider does not list models, **Add a model ID manually** accepts a model or deployment ID. Apply it with the rest of your selections.
+5. Return to the arena. Search inside either player dropdown by model or provider. The benchmark uses the same searchable picker with multiple selection (up to 12 models).
 
-For example, Jev and a local model:
+Only enabled provider models appear in these pickers. Human play and solo mode are available in the arena; heuristic and seeded-random baselines remain available through the API/CLI for experiments and automated validation. The arena defaults to the first two available registered models, or solo mode when only one is available. Model catalogs can include non-text models or models your account cannot run: known unsupported output types are disabled; a catalog entry is not a guarantee of inference access. Discovery supports paginated Anthropic, Gemini and OpenRouter catalogs. Up to 500 models can be stored per provider. Search covers the whole fetched catalog, including rows not yet displayed.
 
-```json
-{
-  "connections": [
-    {
-      "id": "jev",
-      "name": "Jev",
-      "provider": "openrouter-decisions",
-      "model": "typesafe/jev-1.13",
-      "apiKeyEnv": "OPENROUTER_API_KEY"
-    },
-    {
-      "id": "local",
-      "name": "My local model",
-      "provider": "openai-compatible",
-      "baseURL": "http://127.0.0.1:11434/v1",
-      "model": "YOUR_INSTALLED_MODEL",
-      "reasoningOffSupported": true,
-      "providerOptions": { "compatible": { "think": false } }
-    }
-  ]
-}
-```
+The **Connection** tab edits a shared key or endpoint for all models of that provider. Empty key fields preserve the stored key; a new value replaces it; **Remove saved key** explicitly deletes it. Keys are never returned to the browser. **Options** on a saved model controls its display name, reasoning, output format and provider options. **Test saved model** sends one real decision using saved options and may incur API charges. Saving settings and browsing catalogs do not perform inference.
 
-Use `reasoningOffSupported: true` **only after verifying that the endpoint/model can disable reasoning**. The example file leaves this false for unverified LLMs. If a model cannot disable reasoning, explicitly choose `"reasoning": "provider-default"` or `"on"` and report it as a different configuration. Do not mark an unsupported model as compatible just to enable it.
+No source edit, environment variable or restart is required. Deselecting a model keeps its saved ID and options for later re-enabling. Deleting a provider removes its saved models, while historical results remain. Changes apply to future matches; an in-progress match or paired batch keeps its initial configuration.
 
-A profile is a named participant. Duplicate a profile with another `id` to compare two models on the same provider. Within a profile, **Load models** discovers available IDs where supported; the model field also accepts a manual ID. The run records overrides. Changing a model requires rechecking its reasoning and structured-output capabilities.
+Settings opens directly with no administrator registration, password or setup code. It uses the same access policy as the arena: local access by default, the site login on a password-protected deployment, or anonymous access with `PUBLIC_ACCESS=true`. See [deployment](docs/deployment.md).
+
+The SQLite file stores keys and connection details with owner-only file permissions; it is not encrypted at rest. Keep the database and its backups private. To back it up without a SQLite backup client, stop the server, copy `data/`, then restart. Do not copy only the main database while it is running because recent writes may be in its WAL file.
+
+### Existing installations
+
+On the first database initialization, `connections.local.json` (or `CONNECTIONS_FILE`) is imported once. Resolved `apiKeyEnv` credentials are copied into SQLite so those connections no longer depend on the environment. Missing credentials can be supplied in Settings. The old files are left intact; later edits use SQLite and deleted connections are not reimported. `connections.example.json` remains a legacy import/CLI example, not a required setup step.
+
+The first start after upgrading a flat SQLite installation automatically groups models that share a provider endpoint and credential. Model IDs, reasoning/output options, saved keys and past results are preserved. Chat and native Decisions models can share one OpenRouter connection. Back up the database before upgrading; old server versions cannot use the normalized schema.
 
 ### Providers
 
 | Profile `provider`     | API / credentials                                                              | Model inventory                   |
 | ---------------------- | ------------------------------------------------------------------------------ | --------------------------------- |
-| `openrouter-decisions` | OpenRouter native Decisions; `OPENROUTER_API_KEY`                              | Public Decisions catalog          |
-| `openai-compatible`    | Chat Completions at your `baseURL`; optional `apiKeyEnv`                       | `/models`                         |
-| `openai`               | Official OpenAI Responses adapter; `OPENAI_API_KEY`                            | `/models`                         |
-| `anthropic`            | Official Messages adapter; `ANTHROPIC_API_KEY`                                 | `/models`                         |
-| `google`               | Official Gemini adapter; `GOOGLE_GENERATIVE_AI_API_KEY`                        | `/models`                         |
+| `openrouter-decisions` | OpenRouter native Decisions; saved API key                                     | Public Decisions catalog          |
+| `openai-compatible`    | Chat Completions at your API base URL; optional saved key                      | `/models`                         |
+| `openai`               | Official OpenAI Responses adapter; saved API key                               | `/models`                         |
+| `anthropic`            | Official Messages adapter; saved API key                                       | `/models`                         |
+| `google`               | Official Gemini adapter; saved API key                                         | `/models`                         |
 | `azure`                | Official Azure OpenAI adapter; resource name, deployment ID, key               | Manual deployment ID              |
 | `bedrock`              | Official Bedrock adapter; AWS region and credentials, or configured bearer key | Manual model/inference profile ID |
 | `vertex`               | Official Vertex adapter; project, location and ADC, or configured API key      | Manual model ID                   |
 
-`connections.example.json` contains starter profiles. Bedrock uses the official SDK's AWS environment credentials; Vertex uses its official ADC integration. Empty `apiKeyEnv` references make a profile unavailable. Cloud credential-chain readiness is checked when the provider is called, not inferred by the UI.
+The UI separates provider connections from enabled models. OpenRouter detects Chat versus native Decisions from catalog metadata; manual OpenRouter entries let you choose the protocol. OpenAI-compatible and Anthropic-compatible services have separate presets. Native OpenRouter Decisions uses the official endpoint; an OpenRouter URL override is supported for chat models only. Bedrock and Vertex accept saved API keys where supported; AWS IAM and Google Application Default Credentials remain optional server-managed alternatives. Region, project, location, Azure resource and API version can be edited in Settings. Cloud credential-chain readiness is checked when the provider is called, not inferred by the UI.
 
-For **Ollama**, use `http://127.0.0.1:11434/v1`; for **vLLM**, the usual URL is `http://127.0.0.1:8000/v1`. Start and install models using the server's own documentation before running this tool. Neither server is installed automatically. LM Studio, llama.cpp, Groq, Together, Fireworks, DeepInfra and other services can use the compatible adapter when their endpoint implements the required Chat Completions contract. This is protocol support, not a claim that every service/model combination has been tested.
+For **Ollama**, the preset uses `http://localhost:11434/v1`; for **vLLM**, the default URL is `http://localhost:8000/v1`. These addresses refer to the machine running the Node server, not the browser. Start and install models using the server's own documentation before running this tool. Neither server is installed automatically. LM Studio, llama.cpp, Groq, Together, Fireworks, DeepInfra and other services can use the compatible adapter when their endpoint implements the required Chat Completions contract. This is protocol support, not a claim that every service/model combination has been tested.
 
 `providerOptions` uses the **official AI SDK namespace**: `compatible`, `openai`, `anthropic`, `google`, etc. For compatible servers, extra properties are forwarded through the SDK's documented provider-options extension. Ollama's `think: false` and vLLM's `chat_template_kwargs.enable_thinking: false` are model/server-specific; remove unsupported options or adjust them for your installed model/template.
 
 Default output is a strict JSON schema containing exactly `{"choice":"option_N"}`. Set `"output": "json-text"` for a server without schema-constrained output. Its text must still be exact JSON matching that schema; prose, unknown IDs and extra fields are rejected. There is no JSON repair, hidden model fallback or engine-chosen substitute.
 
-Default reasoning is **off**. The SDK receives `reasoning: "none"`; provider-specific flags can be configured where needed. Unsupported/compatibility warnings or reported reasoning output reject an off-mode result. A server may silently ignore flags and omit reasoning usage, so endpoint verification remains necessary. `on` requests the SDK's medium reasoning setting; `provider-default` leaves the provider's default intact. Do not mix these configurations in one claimed fair comparison.
+Newly enabled models use **provider-default** reasoning. Legacy profiles still default to **off**. When off is selected, confirm that the model supports it; the SDK receives `reasoning: "none"`; provider-specific flags can be configured where needed. Unsupported/compatibility warnings or reported reasoning output reject an off-mode result. A server may silently ignore flags and omit reasoning usage, so endpoint verification remains necessary. `on` requests the SDK's medium reasoning setting; `provider-default` leaves the provider's default intact. Do not mix these configurations in one claimed fair comparison.
 
 ## Benchmark
 
@@ -106,7 +94,7 @@ pnpm bench --config bench.example.json
 pnpm bench --config bench.example.json --connections connections.local.json --out results/experiment-1
 ```
 
-The example benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with your profile IDs to use remote or local models. Each pair is run in both seat orders for every seed. The UI's **Paired benchmark** uses the selected mode and optional limits shown above the arena. New pages default to real-time unlimited play; completed runs never replace a new visitor's mode or limits.
+The CLI uses the same saved SQLite connections as the UI. `--connections` explicitly selects a legacy JSON file instead. The example benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with connection IDs from `/api/connections`, or select the models in the UI’s paired benchmark. Each pair is run in both seat orders for every seed. The UI's **Paired benchmark** uses the selected mode and optional limits shown above the arena. New pages default to real-time unlimited play; completed runs never replace a new visitor's mode or limits.
 
 ```json
 {

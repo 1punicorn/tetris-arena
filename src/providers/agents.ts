@@ -9,7 +9,7 @@ import { createGoogleVertex } from '@ai-sdk/google-vertex';
 import { z } from 'zod';
 import type { DecisionAgent, DecisionProblem, DecisionResult } from '../core/types.js';
 import { random } from '../core/random.js';
-import { type Profile, validateEndpoint } from './config.js';
+import { apiKeyFor, type Profile, validateEndpoint } from './config.js';
 
 import { ModelError } from '../core/errors.js';
 export const boundedFetch: typeof fetch = async (input, init) => {
@@ -47,7 +47,7 @@ export const boundedFetch: typeof fetch = async (input, init) => {
 };
 function languageModel(profile: Profile, transport: typeof fetch): LanguageModel {
   const settings = {
-    apiKey: profile.apiKeyEnv ? process.env[profile.apiKeyEnv] : undefined,
+    apiKey: apiKeyFor(profile),
     baseURL: profile.baseURL,
     fetch: transport,
   };
@@ -115,8 +115,7 @@ export function createAgent(
     };
   const profile = profiles.find((p) => p.id === id);
   if (!profile) throw new ModelError('unknown_connection');
-  if (profile.apiKeyEnv && !process.env[profile.apiKeyEnv])
-    throw new ModelError('missing_credential');
+  if (profile.apiKeyEnv && !apiKeyFor(profile)) throw new ModelError('missing_credential');
   if (
     profile.provider !== 'openrouter-decisions' &&
     profile.reasoning === 'off' &&
@@ -136,7 +135,7 @@ export function createAgent(
           signal,
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env[profile.apiKeyEnv ?? 'OPENROUTER_API_KEY'] ?? ''}`,
+            Authorization: `Bearer ${apiKeyFor(profile) ?? ''}`,
           },
           body: JSON.stringify({
             model: profile.model,
@@ -238,7 +237,7 @@ export function createAgent(
 
 /** Inventory requests never perform inference. Manual IDs remain valid when discovery is unsupported. */
 export async function discover(profile: Profile, signal: AbortSignal): Promise<string[]> {
-  const key = profile.apiKeyEnv ? process.env[profile.apiKeyEnv] : undefined;
+  const key = apiKeyFor(profile);
   const headers: Record<string, string> = {};
   let url: string;
   switch (profile.provider) {

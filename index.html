@@ -3,7 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#101522" />
+    <meta name="theme-color" content="#ffffff" />
+    <script>
+      (() => {
+        let theme = 'light';
+        try {
+          if (localStorage.getItem('tetris-theme') === 'dark') theme = 'dark';
+        } catch {}
+        document.documentElement.dataset.theme = theme;
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute('content', theme === 'dark' ? '#191b18' : '#ffffff');
+      })();
+    </script>
     <title>Tetris AI Bench</title>
   </head>
   <body>

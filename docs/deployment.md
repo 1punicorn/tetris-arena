@@ -15,9 +15,21 @@ Use a production build (`pnpm build` then `pnpm start`), not the Vite developmen
 | `PUBLIC_USERNAME` / `PUBLIC_PASSWORD` | HTTP Basic login; use a unique random password of at least 16 characters                      |
 | `PUBLIC_ACCESS=true`                  | Explicitly opts into anonymous access, including model execution billed to server credentials |
 
-Choose authentication or explicitly opt into anonymous access. Startup fails if neither is configured for a public origin. Password protection covers all pages, APIs and SSE, even if the request uses a loopback Host header. The application validates exact Host/Origin. Top-level GET navigation from an external link is allowed; cross-site API fetches, embedded resources and POST requests remain blocked. Fetch Metadata headers are included in `Vary` so caches distinguish these requests. The application it never trusts forwarded headers to grant access. A non-loopback connection must come from the configured proxy IP. Hostname aliases must not be rewritten to bypass these checks.
+Choose authentication or explicitly opt into anonymous access. Startup fails if neither is configured for a public origin. Password protection covers all pages, APIs and SSE, even if the request uses a loopback Host header. The application validates exact Host/Origin. Top-level GET navigation from an external link is allowed; cross-site API fetches, embedded resources and POST requests remain blocked. Fetch Metadata headers are included in `Vary` so caches distinguish these requests. The application never trusts forwarded headers to grant access. A non-loopback connection must come from the configured proxy IP. Hostname aliases must not be rewritten to bypass these checks.
 
 Configure DNS and your HTTPS proxy to forward the domain to `HOST:PORT`, preserving the original Host header. Disable buffering for `/api/events`, allow long-lived SSE and forward Authorization for Basic authentication. Use the proxy's real source IP, not a client IP from `X-Forwarded-For`. The proxy-to-app connection must be on a trusted private network or an encrypted tunnel. Do not expose that HTTP upstream directly to the internet.
+
+## Model settings
+
+`SETTINGS_DB` optionally overrides `data/settings.sqlite`. The service user needs write access to the database directory. Keep it outside the web asset directory and out of version control. Shared provider keys/endpoints, enabled models and model options are managed at `/#settings`, without editing `.env` or restarting the service.
+
+Settings opens directly without administrator registration or a setup code. If the entire site uses HTTP Basic authentication, that login also protects Settings. With `PUBLIC_ACCESS=true`, visitors can access the arena and manage model connections. Saved API keys are never returned to the browser.
+
+An active match or batch retains its original profiles while Settings changes apply to future runs. The server and default CLI share the same SQLite file. Existing JSON profiles and resolved environment keys are imported once on initialization. Original files are retained for migration review; they are no longer the main settings store.
+
+Upgrading a flat settings database migrates it to separate provider and model tables, grouping matching credentials/endpoints and preserving existing model IDs. Stop the old process before starting the new server; keep a pre-upgrade backup if you need to roll back to older code.
+
+The database contains plaintext provider credentials protected by filesystem permissions. Back up the database securely using SQLite-aware tools, or stop the service before copying the whole database directory. Include WAL data if present; do not serve or publish these files.
 
 ## Keep it running with systemd
 
@@ -31,7 +43,7 @@ cp ops/service.env.example ~/.config/tetris/service.env
 chmod 600 ~/.config/tetris/service.env
 ```
 
-Edit the service's `WorkingDirectory` and `ExecStart` for your checkout and absolute Node 24 binary (`command -v node`). Edit `service.env` with your bind IP, proxy IP, domain and access choice. Keep provider keys in the checkout's ignored `.env`. Do not commit the real service environment or print passwords in logs.
+Edit the service's `WorkingDirectory` and `ExecStart` for your checkout and absolute Node 24 binary (`command -v node`). Edit `service.env` with your bind IP, proxy IP, domain and access choice. Configure provider keys through the Settings screen; they persist in the private SQLite database. Do not commit the real service environment or print passwords in logs.
 
 ```sh
 systemctl --user daemon-reload

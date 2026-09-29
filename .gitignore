@@ -5,6 +5,11 @@ results/
 .env.*
 !.env.example
 connections.local.json
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.setup-code
 test-results/
 playwright-report/
 .runtime/
