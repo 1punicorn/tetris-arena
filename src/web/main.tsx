@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import type { Action } from '../core/engine.js';
 import { PlayerGame } from './game-view.js';
 import { Replay } from './replay.js';
+import { matchTime } from './time.js';
 import type { Snapshot } from '../core/runner.js';
+import type { RecordedMatch } from '../server/artifacts.js';
 import { api } from './api.js';
 import { Settings } from './experiment-settings.js';
 import { ModelPicker } from './model-picker.js';
@@ -29,6 +31,7 @@ type State = {
   benchmark: BenchmarkState | null;
   error: string | null;
   demo: DemoMode | null;
+  canStart: boolean;
 };
 type Page = 'arena' | 'benchmark' | 'results' | 'replay' | 'settings';
 function currentPage(): Page {
@@ -67,6 +70,9 @@ function App() {
     theme === 'light'
       ? t('Switch to dark mode', '다크 모드로 전환')
       : t('Switch to light mode', '라이트 모드로 전환');
+  const [stateLoaded, setStateLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMore, setHistoryMore] = useState(false);
   const [page, setPage] = useState<Page>(currentPage);
   const [replayId, setReplayId] = useState(currentReplayId);
   const [connections, setConnections] = useState<Connection[]>([]),
@@ -82,13 +88,14 @@ function App() {
       benchmark: null,
       error: null,
       demo: null,
+      canStart: false,
     }),
     [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>(
       'connecting',
     );
   const [error, setError] = useState(''),
     [pending, setPending] = useState(false),
-    [results, setResults] = useState<Snapshot[]>([]);
+    [results, setResults] = useState<RecordedMatch[]>([]);
   const [benchDraft, setBenchDraft] = useState<BenchmarkDraft>({
     models: [],
     seeds: '1,2,3,4,5',
@@ -118,10 +125,22 @@ function App() {
     maxTurns: turns,
     modelOverrides: {},
   };
-  const refresh = () =>
-    api<Snapshot[]>('/results')
-      .then(setResults)
-      .catch(() => {});
+  const refresh = async (older = false) => {
+    setHistoryLoading(true);
+    try {
+      const items = await api<RecordedMatch[]>(
+        `/results?limit=30&offset=${older ? results.length : 0}`,
+      );
+      setResults((previous) =>
+        older ? [...previous, ...items.filter((s) => !previous.some((p) => p.id === s.id))] : items,
+      );
+      setHistoryMore(items.length === 30);
+    } catch {
+      setError(t('Could not load results.', '경기 기록을 불러오지 못했습니다.'));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
   const refreshConnections = async () => {
     const latest = await api<Connection[]>('/connections');
     setConnections(latest);
@@ -178,6 +197,7 @@ function App() {
     const events = new EventSource('/api/events');
     events.addEventListener('state', (event) => {
       setState(JSON.parse(event.data));
+      setStateLoaded(true);
       setConnectionStatus('connected');
     });
     events.onerror = () => setConnectionStatus('reconnecting');
@@ -227,11 +247,15 @@ function App() {
     });
   }, [connections, connectionsLoaded, active, mode, players.join(',')]);
   useEffect(() => {
-    if (state.snapshot?.status === 'finished') void refresh();
-  }, [state.snapshot?.id, state.snapshot?.status]);
+    if (state.snapshot?.status === 'finished' && state.canStart) void refresh();
+  }, [state.snapshot?.id, state.snapshot?.status, state.canStart]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (page !== 'arena' || (e.target as HTMLElement).closest('input,select,textarea,button'))
+      if (
+        demo ||
+        page !== 'arena' ||
+        (e.target as HTMLElement).closest('input,select,textarea,button')
+      )
         return;
       const p = state.snapshot?.config.players.indexOf('human') ?? -1;
       if (p < 0) return;
@@ -253,7 +277,7 @@ function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [state.snapshot?.config.players.join(','), page]);
+  }, [state.snapshot?.config.players.join(','), page, !!demo]);
   const summary =
     shown?.status === 'finished'
       ? shown.reason === 'top_out'
@@ -262,6 +286,12 @@ function App() {
           : `P${shown.winner + 1} ${t('wins', '승리')}`
         : shown.reason
       : (shown?.status ?? t('Ready to play', '대전 준비'));
+  if (!stateLoaded)
+    return (
+      <main>
+        <p role="status">{t('Connecting to the arena…', '대전 서버에 연결하는 중…')}</p>
+      </main>
+    );
   return (
     <main>
       <header className="site-header">
@@ -337,6 +367,14 @@ function App() {
           {t('Reconnecting to the server…', '서버에 다시 연결하는 중…')}
         </p>
       )}
+      {demo && (
+        <p className="hint demo-notice" role="note">
+          {t(
+            'Demo · Explore all screens and settings in read-only mode. Start Match and replay are available; everyone watches the same live match.',
+            '데모 · 모든 화면과 설정을 읽기 전용으로 둘러볼 수 있습니다. 대전 시작과 리플레이는 이용할 수 있으며, 모든 방문자가 같은 실시간 경기를 관전합니다.',
+          )}
+        </p>
+      )}
       <div className="page-heading">
         <div>
           <h1>
@@ -389,17 +427,13 @@ function App() {
         </div>
       )}
       {page === 'settings' ? (
-        <Settings
-          t={t}
-          onChanged={refreshConnections}
-          demoModels={demo ? registeredModels : undefined}
-        />
+        <Settings t={t} onChanged={refreshConnections} readOnly={!!demo} />
       ) : page === 'benchmark' ? (
         <Benchmark
           t={t}
           models={registeredModels}
           draft={demo ? { ...benchDraft, models: demo.models } : benchDraft}
-          demoMode={!!demo}
+          readOnly={!!demo}
           onChange={setBenchDraft}
           benchmark={state.benchmark}
           progress={state.progress}
@@ -433,6 +467,12 @@ function App() {
             <h2>{t('Match history', '경기 기록')}</h2>
             <a href="/api/results.csv">{t('Export CSV', 'CSV 내려받기')} ↓</a>
           </div>
+          <p className="hint">
+            {t(
+              'Latest first · Times are in your local timezone.',
+              '최신 경기부터 표시합니다 · 시간은 현재 기기의 시간대 기준입니다.',
+            )}
+          </p>
           {!results.length ? (
             <p className="hint">
               {t(
@@ -442,7 +482,7 @@ function App() {
             </p>
           ) : (
             <div className="results">
-              {results.slice(0, 30).map((s) => (
+              {results.map((s) => (
                 <div className="result" key={s.id}>
                   <div>
                     <strong>
@@ -450,6 +490,13 @@ function App() {
                         .map((id) => connections.find((c) => c.id === id)?.name ?? id)
                         .join(' / ')}
                     </strong>
+                    <small>
+                      <time dateTime={s.createdAt} title={s.createdAt}>
+                        {matchTime(s.createdAt, t('en-US', 'ko-KR'))}
+                      </time>
+                      {' · '}
+                      {(s.elapsedMs / 1000).toFixed(1)}s
+                    </small>
                     <small>
                       {s.config.mode} · seed {s.config.seed} · {s.reason} · {s.id.slice(0, 8)}
                     </small>
@@ -468,6 +515,14 @@ function App() {
               ))}
             </div>
           )}
+          {historyLoading && (
+            <p role="status">{t('Loading matches…', '경기 기록을 불러오는 중…')}</p>
+          )}
+          {historyMore && (
+            <button disabled={historyLoading} onClick={() => void refresh(true)}>
+              {t('Load older matches', '이전 경기 더 보기')}
+            </button>
+          )}
         </section>
       ) : page === 'replay' ? null : (
         <>
@@ -478,7 +533,7 @@ function App() {
                 <select
                   aria-label="Mode"
                   value={arenaMode}
-                  disabled={active}
+                  disabled={active || !!demo}
                   onChange={(e) => setMode(e.target.value as typeof mode)}
                 >
                   <option value="realtime">{t('Real-time match', '실시간 대전')}</option>
@@ -489,9 +544,9 @@ function App() {
                 {t('Seed', '시드')}
                 <input
                   aria-label="Seed"
-                  value={liveConfig?.seed ?? seed}
+                  value={liveConfig?.seed ?? (demo ? t('Automatic', '자동') : seed)}
                   maxLength={100}
-                  disabled={active}
+                  disabled={active || !!demo}
                   onChange={(e) => setSeed(e.target.value)}
                 />
               </label>
@@ -504,7 +559,7 @@ function App() {
                   type="number"
                   min="1"
                   max={arenaMode === 'realtime' ? 600 : 2000}
-                  disabled={active}
+                  disabled={active || !!demo}
                   value={
                     (liveConfig
                       ? arenaMode === 'realtime'
@@ -524,24 +579,39 @@ function App() {
               </label>
               <button
                 className="primary"
-                disabled={active || pending || connectionStatus !== 'connected' || !canStart}
+                disabled={
+                  active ||
+                  pending ||
+                  connectionStatus !== 'connected' ||
+                  !canStart ||
+                  !state.canStart
+                }
                 onClick={() =>
                   void perform(async () => {
-                    await api('/runs', runConfig);
+                    try {
+                      await api('/runs', demo ? {} : runConfig);
+                    } catch (error) {
+                      if (demo && (error as Error).message === 'run_in_progress')
+                        setState(await api<State>('/state'));
+                      else throw error;
+                    }
                   })
                 }
               >
                 {t('Start match', '대전 시작')}
               </button>
               <button
-                disabled={!active || arenaMode === 'decision'}
+                disabled={!!demo || !active || arenaMode === 'decision'}
                 onClick={() => void perform(() => api('/pause', {}))}
               >
                 {state.snapshot?.status === 'paused'
                   ? t('Resume', '계속')
                   : t('Pause', '일시 정지')}
               </button>
-              <button disabled={!active} onClick={() => void perform(() => api('/cancel', {}))}>
+              <button
+                disabled={!!demo || !active}
+                onClick={() => void perform(() => api('/cancel', {}))}
+              >
                 {state.progress.active ? t('Stop benchmark', '벤치마크 중단') : t('Stop', '종료')}
               </button>
             </div>
@@ -568,7 +638,7 @@ function App() {
               </p>
             )}
           </section>
-          <div className="match-strip">
+          <div className="match-strip" data-run-id={shown?.id}>
             <span className="status">{summary}</span>
             <span>
               {t('Turn', '턴')} {shown?.turn ?? 0} <b>·</b>{' '}
@@ -673,19 +743,12 @@ function App() {
             })}
           </section>
           <section className="content-section connections">
-            <h2>
-              {demo ? t('Demo settings', '데모 설정') : t('Add your models', '내 모델 연결하기')}
-            </h2>
+            <h2>{t('Add your models', '내 모델 연결하기')}</h2>
             <p>
-              {demo
-                ? t(
-                    'Models are fixed in this demo. View the saved prompts and model options in Settings.',
-                    '데모에서는 모델이 고정되어 있습니다. 설정 화면에서 저장된 프롬프트와 모델 옵션을 확인하세요.',
-                  )
-                : t(
-                    'Manage providers, API keys and saved model IDs from Settings.',
-                    '설정 화면에서 공급자, API 키, 모델 ID를 추가하고 저장하세요.',
-                  )}
+              {t(
+                'Manage providers, API keys and saved model IDs from Settings.',
+                '설정 화면에서 공급자, API 키, 모델 ID를 추가하고 저장하세요.',
+              )}
             </p>
             <a className="page-link" href="#settings">
               {t('Open settings', '설정 열기')} →

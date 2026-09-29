@@ -15,11 +15,11 @@ type Translate = (en: string, ko: string) => string;
 export function Settings({
   t,
   onChanged,
-  demoModels,
+  readOnly = false,
 }: {
   t: Translate;
   onChanged: () => Promise<void>;
-  demoModels?: { id: string; name: string; model: string; providerName?: string }[];
+  readOnly?: boolean;
 }) {
   const [tab, setTab] = useState('models');
   const [visited, setVisited] = useState(new Set(['models']));
@@ -39,14 +39,6 @@ export function Settings({
   };
   return (
     <>
-      {demoModels && (
-        <p className="hint demo-settings-notice">
-          {t(
-            'Demo mode · All settings are read-only. Matches use the two fixed models.',
-            '데모 모드 · 모든 설정은 읽기 전용입니다. 대전에는 지정된 두 모델만 사용합니다.',
-          )}
-        </p>
-      )}
       <div
         className="provider-tabs settings-tabs"
         role="tablist"
@@ -87,30 +79,15 @@ export function Settings({
         aria-labelledby="settings-tab-models"
         hidden={tab !== 'models'}
       >
-        {demoModels ? (
-          <section>
-            <h2>{t('Demo models', '데모 모델')}</h2>
-            <dl className="demo-models">
-              {demoModels.map((model) => (
-                <div key={model.id}>
-                  <dt>{model.name}</dt>
-                  <dd>
-                    {model.providerName} · {model.model}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ) : (
-          <ModelSettings
-            t={t}
-            revision={providerRevision}
-            onChanged={async () => {
-              setProtocolRevision((v) => v + 1);
-              await onChanged();
-            }}
-          />
-        )}
+        <ModelSettings
+          t={t}
+          readOnly={readOnly}
+          revision={providerRevision}
+          onChanged={async () => {
+            setProtocolRevision((v) => v + 1);
+            await onChanged();
+          }}
+        />
       </div>
       <div
         role="tabpanel"
@@ -118,7 +95,7 @@ export function Settings({
         aria-labelledby="settings-tab-prompts"
         hidden={tab !== 'prompts'}
       >
-        {visited.has('prompts') && <ExperimentSettings t={t} readOnly={!!demoModels} />}
+        {visited.has('prompts') && <ExperimentSettings t={t} readOnly={readOnly} />}
       </div>
       <div
         role="tabpanel"
@@ -131,7 +108,8 @@ export function Settings({
             t={t}
             type={protocol}
             revision={protocolRevision}
-            readOnly={!!demoModels}
+            readOnly={readOnly}
+
             onOpenProviders={() => show('models')}
             onChanged={async () => {
               setProviderRevision((v) => v + 1);
@@ -190,15 +168,10 @@ function ExperimentSettings({ t, readOnly = false }: { t: Translate; readOnly?: 
     <section className="content-section experiment-settings">
       <h2>{t('Prompts & requests', '프롬프트 및 요청')}</h2>
       <p className="hint">
-        {readOnly
-          ? t(
-              'These common instructions are used by both demo models. Settings are read-only.',
-              '두 데모 모델이 사용하는 공통 지침입니다. 설정은 읽기 전용입니다.',
-            )
-          : t(
-              'Shared by all models. Model-specific instructions are appended in model options. Saving applies to the next match or benchmark; a running batch keeps its original settings.',
-              '모든 모델이 사용하는 공통 설정입니다. 모델 옵션에서 추가 지침을 붙일 수 있습니다. 저장한 설정은 다음 경기·벤치마크부터 적용되며 진행 중인 배치는 기존 설정을 유지합니다.',
-            )}
+        {t(
+          'Shared by all models. Model-specific instructions are appended in model options. Saving applies to the next match or benchmark; a running batch keeps its original settings.',
+          '모든 모델이 사용하는 공통 설정입니다. 모델 옵션에서 추가 지침을 붙일 수 있습니다. 저장한 설정은 다음 경기·벤치마크부터 적용되며 진행 중인 배치는 기존 설정을 유지합니다.',
+        )}
       </p>
       <form
         onSubmit={async (e) => {

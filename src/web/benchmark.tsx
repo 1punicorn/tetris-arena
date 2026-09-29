@@ -19,7 +19,7 @@ export function Benchmark({
   active,
   pending,
   connected,
-  demoMode = false,
+  readOnly = false,
   onStart,
   onStop,
   onWatch,
@@ -34,7 +34,7 @@ export function Benchmark({
   active: boolean;
   pending: boolean;
   connected: boolean;
-  demoMode?: boolean;
+  readOnly?: boolean;
   onStart: () => void;
   onStop: () => void;
   onWatch: () => void;
@@ -120,7 +120,7 @@ export function Benchmark({
                 <button type="button" onClick={onWatch}>
                   {t('Watch current match', '현재 경기 보기')} <span aria-hidden="true">→</span>
                 </button>
-                <button type="button" disabled={pending || !connected} onClick={onStop}>
+                <button type="button" disabled={readOnly || pending || !connected} onClick={onStop}>
                   {t('Stop benchmark', '벤치마크 중단')}
                 </button>
               </>
@@ -150,7 +150,7 @@ export function Benchmark({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (valid && !active && !pending && connected) onStart();
+            if (!readOnly && valid && !active && !pending && connected) onStart();
           }}
         >
           <ModelPicker
@@ -160,15 +160,7 @@ export function Benchmark({
             value={draft.models}
             onChange={(selection) => onChange({ ...draft, models: selection })}
             multiple
-            disabled={active || pending || demoMode}
-            description={
-              demoMode
-                ? t(
-                    'Models cannot be changed in demo mode.',
-                    '데모 모드에서는 모델을 변경할 수 없습니다.',
-                  )
-                : undefined
-            }
+            disabled={readOnly || active || pending}
           />
           {draft.models.length > 0 && (
             <ul
@@ -188,34 +180,32 @@ export function Benchmark({
                         {!model?.available && <> · {t('Unavailable', '사용 불가')}</>}
                       </small>
                     </div>
-                    {!demoMode && (
-                      <button
-                        type="button"
-                        className="benchmark-remove"
-                        aria-label={t(
-                          `Remove ${displayName} from benchmark`,
-                          `벤치마크에서 ${displayName} 제외`,
-                        )}
-                        title={t('Remove from this benchmark', '이번 벤치마크에서 제외')}
-                        disabled={active || pending}
-                        onClick={(e) => {
-                          const row = e.currentTarget.closest('li');
-                          const next = row?.nextElementSibling ?? row?.previousElementSibling;
-                          const target =
-                            next?.querySelector('button') ??
-                            e.currentTarget
-                              .closest('form')
-                              ?.querySelector<HTMLButtonElement>('.model-select-trigger');
-                          target?.focus();
-                          onChange({
-                            ...draft,
-                            models: draft.models.filter((value) => value !== id),
-                          });
-                        }}
-                      >
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="benchmark-remove"
+                      aria-label={t(
+                        `Remove ${displayName} from benchmark`,
+                        `벤치마크에서 ${displayName} 제외`,
+                      )}
+                      title={t('Remove from this benchmark', '이번 벤치마크에서 제외')}
+                      disabled={readOnly || active || pending}
+                      onClick={(e) => {
+                        const row = e.currentTarget.closest('li');
+                        const next = row?.nextElementSibling ?? row?.previousElementSibling;
+                        const target =
+                          next?.querySelector('button') ??
+                          e.currentTarget
+                            .closest('form')
+                            ?.querySelector<HTMLButtonElement>('.model-select-trigger');
+                        target?.focus();
+                        onChange({
+                          ...draft,
+                          models: draft.models.filter((value) => value !== id),
+                        });
+                      }}
+                    >
+                      <span aria-hidden="true">×</span>
+                    </button>
                   </li>
                 );
               })}
@@ -227,7 +217,7 @@ export function Benchmark({
               <input
                 aria-label={t('Benchmark seeds', '벤치마크 시드')}
                 value={draft.seeds}
-                disabled={active || pending}
+                disabled={readOnly || active || pending}
                 maxLength={5049}
                 onChange={(e) => onChange({ ...draft, seeds: e.target.value })}
               />
@@ -241,7 +231,7 @@ export function Benchmark({
                 max={2000}
                 value={draft.maxTurns ?? ''}
                 placeholder={t('Unlimited', '무제한')}
-                disabled={active || pending}
+                disabled={readOnly || active || pending}
                 onChange={(e) =>
                   onChange({
                     ...draft,
@@ -270,7 +260,7 @@ export function Benchmark({
             <button
               type="submit"
               className="primary"
-              disabled={!valid || active || pending || !connected}
+              disabled={readOnly || !valid || active || pending || !connected}
             >
               {t('Run benchmark', '벤치마크 실행')}
             </button>

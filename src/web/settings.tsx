@@ -86,10 +86,12 @@ export function ModelSettings({
   t,
   onChanged,
   revision = 0,
+  readOnly = false,
 }: {
   t: Translate;
   onChanged: () => Promise<void>;
   revision?: number;
+  readOnly?: boolean;
 }) {
   const [providers, setProviders] = useState<EditableProvider[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -186,6 +188,7 @@ export function ModelSettings({
     setVisible(100);
   }, [query, filter]);
   const perform = async (fn: () => Promise<void>) => {
+    if (readOnly) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -198,6 +201,7 @@ export function ModelSettings({
     }
   };
   const fetchCatalog = async (p: EditableProvider) => {
+    if (readOnly) return;
     discovery.current?.abort();
     const request = new AbortController();
     discovery.current = request;
@@ -267,6 +271,9 @@ export function ModelSettings({
       if (!request.signal.aborted) setLoading(false);
     }
   };
+  useEffect(() => {
+    if (readOnly && !selectedId && providers[0]) void open(providers[0], true);
+  }, [readOnly, selectedId, providers]);
   const change = <K extends keyof ProviderInput>(key: K, value: ProviderInput[K]) =>
     setForm((p) => ({ ...p, [key]: value }));
   const saveConnection = () =>
@@ -351,7 +358,11 @@ export function ModelSettings({
       <div className="connection-layout">
         <aside className="connection-list">
           <h2>{t('Providers', '공급자')}</h2>
-          <button className="add-connection" disabled={busy} onClick={() => void open(null)}>
+          <button
+            className="add-connection"
+            disabled={busy || readOnly}
+            onClick={() => void open(null)}
+          >
             {t('Add provider', '공급자 추가')} +
           </button>
           {!providers.length && (
@@ -420,7 +431,7 @@ export function ModelSettings({
                   '이 공급자의 모든 모델이 하나의 API 키를 공유합니다.',
                 )}
               </p>
-              <fieldset disabled={busy}>
+              <fieldset disabled={busy || readOnly}>
                 <div className="connection-fields">
                   <label>
                     {t('Provider', '공급자')}
@@ -463,7 +474,9 @@ export function ModelSettings({
                       value={form.apiKey ?? ''}
                       placeholder={
                         selected?.hasApiKey
-                          ? t('Saved — leave blank to keep it', '저장됨 — 비워 두면 기존 키 유지')
+                          ? readOnly
+                            ? t('Saved · hidden', '저장됨 · 비공개')
+                            : t('Saved — leave blank to keep it', '저장됨 — 비워 두면 기존 키 유지')
                           : t(
                               'Local servers may not require a key',
                               '로컬 서버는 키가 필요하지 않을 수 있습니다',
@@ -604,7 +617,7 @@ export function ModelSettings({
                   <option value="unselected">{t('Not selected', '선택 안 됨')}</option>
                 </select>
                 <button
-                  disabled={catalogLoading || loading || busy}
+                  disabled={readOnly || catalogLoading || loading || busy}
                   onClick={() => selected && void fetchCatalog(selected)}
                 >
                   {catalogLoading ? t('Fetching…', '조회 중…') : t('Refresh', '새로고침')}
@@ -643,7 +656,7 @@ export function ModelSettings({
                 <div>
                   <button
                     className="text-button"
-                    disabled={busy || loading}
+                    disabled={readOnly || busy || loading}
                     onClick={() =>
                       setSelection(
                         (p) => new Set([...p, ...filtered.filter((m) => m.supported).map(keyOf)]),
@@ -654,7 +667,7 @@ export function ModelSettings({
                   </button>
                   <button
                     className="text-button"
-                    disabled={busy || loading}
+                    disabled={readOnly || busy || loading}
                     onClick={() =>
                       setSelection(
                         (p) => new Set([...p].filter((k) => !filtered.some((m) => keyOf(m) === k))),
@@ -673,7 +686,7 @@ export function ModelSettings({
                 </span>
                 <button
                   className="primary"
-                  disabled={busy || loading || !dirty || selection.size > 500}
+                  disabled={readOnly || busy || loading || !dirty || selection.size > 500}
                   onClick={() => void apply()}
                 >
                   {busy ? t('Applying…', '적용 중…') : t('Apply models', '모델 적용')}
@@ -718,7 +731,7 @@ export function ModelSettings({
                           <input
                             type="checkbox"
                             checked={selection.has(key)}
-                            disabled={busy || !m.supported}
+                            disabled={readOnly || busy || !m.supported}
                             onChange={() => toggle(key)}
                             aria-label={m.name}
                           />
@@ -769,6 +782,7 @@ export function ModelSettings({
                             model={record}
                             t={t}
                             onSaved={updateModel}
+                            readOnly={readOnly}
                           />
                         ))}
                     </React.Fragment>
@@ -785,6 +799,7 @@ export function ModelSettings({
                 className="manual-model"
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (readOnly) return;
                   const id = manualId.trim();
                   if (!id) return;
                   const row: CatalogModel = { id, name: id, api: manualApi, supported: true };
@@ -800,6 +815,7 @@ export function ModelSettings({
                   <input
                     required
                     maxLength={256}
+                    disabled={readOnly}
                     value={manualId}
                     placeholder={t('Model ID or deployment name', '모델 ID 또는 배포 이름')}
                     onChange={(e) => setManualId(e.target.value)}
@@ -809,6 +825,7 @@ export function ModelSettings({
                   <label>
                     {t('API protocol', 'API 프로토콜')}
                     <select
+                      disabled={readOnly}
                       value={manualApi}
                       onChange={(e) => setManualApi(e.target.value as typeof manualApi)}
                     >
@@ -817,7 +834,7 @@ export function ModelSettings({
                     </select>
                   </label>
                 )}
-                <button disabled={busy || loading} type="submit">
+                <button disabled={readOnly || busy || loading} type="submit">
                   {t('Add', '추가')}
                 </button>
               </form>
@@ -842,9 +859,9 @@ export function ModelOptions({
   readOnly = false,
 }: {
   model: StoredModel;
+  readOnly?: boolean;
   t: Translate;
   onSaved: (model: StoredModel | null, removedId?: string) => Promise<void>;
-  readOnly?: boolean;
 }) {
   const { id, providerId: _providerId, ...initial } = model;
   const [form, setForm] = useState<ModelInput>(initial);
@@ -866,6 +883,7 @@ export function ModelOptions({
     [notice, setNotice] = useState('');
   const [remove, setRemove] = useState(false);
   const perform = async (fn: () => Promise<void>) => {
+    if (readOnly) return;
     setBusy(true);
     setError('');
     setNotice('');

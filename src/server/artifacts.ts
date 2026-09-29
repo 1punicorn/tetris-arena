@@ -8,6 +8,8 @@ import { DEFAULT_EXPERIMENT, type Experiment } from '../core/experiment.js';
 import { redactParameters } from '../providers/model-settings.js';
 import { OUTPUT_INSTRUCTION } from '../providers/agents.js';
 
+export type RecordedMatch = Snapshot & { createdAt: string };
+
 export class Artifacts {
   private tasks = Promise.resolve();
   private failed: unknown;
@@ -109,19 +111,50 @@ export class Artifacts {
     await this.tasks;
     if (this.failed) throw new Error('artifact_write_failed');
   }
-  async list(): Promise<Snapshot[]> {
+  async list(
+    options: { models?: [string, string]; offset?: number; limit?: number } = {},
+  ): Promise<RecordedMatch[]> {
     await this.flush();
     await mkdir(this.root, { recursive: true });
-    const result: Snapshot[] = [];
+    const result: RecordedMatch[] = [];
+    const entries = [];
     for (const entry of await readdir(this.root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !this.validId(entry.name)) continue;
       try {
-        result.push(JSON.parse(await this.read(entry.name, 'summary.json')));
+        const info = await stat(join(this.root, entry.name, 'summary.json'));
+        let time = info.mtimeMs;
+        try {
+          const metadata = JSON.parse(await this.read(entry.name, 'metadata.json'));
+          const created = Date.parse(metadata.createdAt);
+          if (Number.isFinite(created)) time = created;
+        } catch {
+          // Older recordings may have no creation metadata.
+        }
+        entries.push({ id: entry.name, time });
       } catch {
         /* In-progress runs have no summary. */
       }
     }
-    return result.reverse();
+    entries.sort((a, b) => b.time - a.time || b.id.localeCompare(a.id));
+    let skipped = 0;
+    for (const entry of entries) {
+      try {
+        const summary: Snapshot = JSON.parse(await this.read(entry.id, 'summary.json'));
+        if (summary.status !== 'finished') continue;
+        if (
+          options.models &&
+          (new Set(summary.config.players).size !== 2 ||
+            !summary.config.players.every((id) => options.models!.includes(id)))
+        )
+          continue;
+        if (skipped++ < (options.offset ?? 0)) continue;
+        result.push({ ...summary, createdAt: new Date(entry.time).toISOString() });
+        if (options.limit !== undefined && result.length >= options.limit) break;
+      } catch {
+        /* Skip incomplete or unreadable recordings without hiding the rest. */
+      }
+    }
+    return result;
   }
   validId(id: string) {
     return /^[a-f0-9-]{36}$/.test(id);

@@ -67,7 +67,7 @@ Preview uses the current editor values, a sample board, and saved settings from 
 
 No source edit, environment variable or restart is required. Deselecting a model keeps its saved ID and options for later re-enabling. Deleting a provider removes its saved models, while historical results remain. Changes apply to future matches; an in-progress match or paired batch keeps its initial configuration.
 
-### Fixed-model demo
+### Read-only demo
 
 For a public demo, register the two models first, then set an optional server environment variable in `.env` or the service environment file:
 
@@ -75,9 +75,17 @@ For a public demo, register the two models first, then set an optional server en
 DEMO_MODELS=jev,deepseek/deepseek-v4.1-flash
 ```
 
-Each entry can be a saved connection ID from `/api/connections` or an API model ID that uniquely identifies an enabled, available registration. Exactly two distinct models are required; an invalid configuration prevents startup. Restart the server to apply it. In demo mode, Arena and Benchmark use only this pair, model selectors explain that changes are disabled, and all provider/model/prompt settings are read-only. Saved-request previews still work without inference; model tests and catalog discovery are disabled. The server also rejects other participants, model overrides and settings writes through the API. Existing registrations and credentials stay in SQLite. Unset or empty `DEMO_MODELS` restores normal behavior after restart. This option applies to the web server, not the CLI.
+Each entry can be a saved connection ID from `/api/connections` or an API model ID that uniquely identifies an enabled, available registration. Exactly two distinct models are required; an invalid configuration prevents startup. Restart the server to apply it.
 
-Settings opens directly with no administrator registration, password or setup code. It uses the same access policy as the arena: local access by default, the site login on a password-protected deployment, or anonymous access with `PUBLIC_ACCESS=true`. See [deployment](docs/deployment.md).
+The demo uses the **same Arena, Benchmark, Results, Replay and Settings screens** as the full local tool. Visitors can browse providers, connection fields, model options and prompts; edits, saves, additions, deletion, model tests, catalog refresh, benchmark execution, Pause and Stop are disabled. API keys are never returned to the browser, and credentials in advanced parameter objects are redacted. Only the configured pair and their providers/recordings are exposed. Saved-request previews run locally without inference and cannot override saved settings.
+
+Anyone can start one shared real-time match; all visitors watch that same match. The next match can start after the current match and its recording finish. Models and sides are fixed, each match gets a fresh server-generated seed, and saved prompts/model options apply. `POST /api/runs` accepts only `{}` in demo mode; the server also blocks direct attempts to change settings or invoke restricted actions.
+
+Results shows match start date/time in the viewer's local timezone, newest first, with older matches available through “Load older matches.” Replay also displays the recorded start time when available. Legacy recordings without creation metadata use the summary's modification time for listing. Recordings survive restarts; playback makes no model requests. No sample recordings are bundled. Read-only result/CSV exports and recorded prompts/options remain available, with credentials redacted.
+
+The app adds no daily usage quota, match time limit or automatic recording deletion. The operator manages provider spending limits and storage. Anonymous HTTPS access (`PUBLIC_ACCESS=true`) requires valid `DEMO_MODELS`; without it startup fails. To edit settings, stop public access and run locally, or use an authenticated private deployment. Existing registrations and credentials stay in SQLite. Unset or empty `DEMO_MODELS` restores normal local/private behavior after restart. This option applies to the web server, not the CLI.
+
+Settings opens directly with no administrator registration, password or setup code. It is available locally by default or behind the site login on a password-protected deployment. Settings is read-only in demo mode. See [deployment](docs/deployment.md).
 
 The SQLite file stores keys and connection details with owner-only file permissions; it is not encrypted at rest. Keep the database and its backups private. To back it up without a SQLite backup client, stop the server, copy `data/`, then restart. Do not copy only the main database while it is running because recent writes may be in its WAL file.
 

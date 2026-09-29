@@ -22,9 +22,18 @@ export class Manager extends EventEmitter {
   constructor(readonly artifacts = new Artifacts()) {
     super();
   }
+  get canStart() {
+    return (
+      !this.error &&
+      !this.finalizing &&
+      !this.progress.active &&
+      (!this.runner || this.runner.status === 'finished')
+    );
+  }
   start(config: RunConfig, profiles: Profile[], experiment: Experiment = DEFAULT_EXPERIMENT) {
     if (this.finalizing || (this.runner && this.runner.status !== 'finished'))
       throw new Error('run_in_progress');
+    if (this.error === 'artifact_write_failed') throw new Error(this.error);
     config = structuredClone(config);
     experiment = structuredClone(experiment);
     profiles = structuredClone(profiles).map((p) => ({
@@ -41,9 +50,9 @@ export class Manager extends EventEmitter {
       (event) => {
         if (event.type === 'state') {
           this.artifacts.record(event);
+          if (event.snapshot.status === 'finished') this.finalizing = true;
           this.emit('state', event.snapshot);
           if (event.snapshot.status === 'finished') {
-            this.finalizing = true;
             void this.finished(profiles, experiment);
           }
         } else this.artifacts.decision(runner.id, event);

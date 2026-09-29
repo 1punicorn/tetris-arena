@@ -1571,25 +1571,7 @@ button.danger {
   font-size: 11px;
   line-height: 1.5;
 }
-.demo-settings-notice {
-  margin: 0 0 24px;
-}
-.demo-models {
-  max-width: 980px;
-}
-.demo-models > div {
-  padding: 20px 0;
-  border-bottom: 1px solid var(--line);
-}
-.demo-models dt {
-  font-weight: 500;
-}
-.demo-models dd {
-  margin: 8px 0 0;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-  font: 12px/1.6 var(--mono);
-}
+
 .model-select-trigger {
   display: flex;
   width: 100%;

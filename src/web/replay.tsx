@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import type { RunEvent, Snapshot } from '../core/runner.js';
 import { PlayerGame } from './game-view.js';
+import { matchTime } from './time.js';
 
 type RecordedModel = { id: string; model: string; provider: string; reasoning?: string | null };
-type Recording = { id: string; frames: Snapshot[]; connections: RecordedModel[] };
+type Recording = {
+  id: string;
+  frames: Snapshot[];
+  connections: RecordedModel[];
+  createdAt?: string;
+};
 
 export function Replay({
   active,
@@ -50,6 +56,9 @@ export function Replay({
           id: runId,
           frames,
           connections: Array.isArray(metadata?.connections) ? metadata.connections : [],
+          createdAt: Number.isFinite(Date.parse(metadata?.createdAt))
+            ? metadata.createdAt
+            : undefined,
         });
     })().catch(() => {
       if (!controller.signal.aborted) setError(true);
@@ -117,6 +126,15 @@ export function Replay({
             {last.winner === null ? last.reason : `P${last.winner + 1} ${t('wins', '승리')}`}
             {' · '}
             {t('Match', '경기')} {recording.id.slice(0, 8)}
+            {recording.createdAt && (
+              <>
+                {' '}
+                ·{' '}
+                <time dateTime={recording.createdAt} title={recording.createdAt}>
+                  {matchTime(recording.createdAt, t('en-US', 'ko-KR'))}
+                </time>
+              </>
+            )}
           </p>
         </div>
         <a className="page-link" href="#results">

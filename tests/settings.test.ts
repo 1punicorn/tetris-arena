@@ -39,7 +39,7 @@ const input = (extra = {}) => ({
   apiKey: 'private-test-api-key',
   ...extra,
 });
-async function setup(publicAccess = false) {
+async function setup(published = false) {
   const dir = await mkdtemp(join(tmpdir(), 'tetris-settings-'));
   dirs.push(dir);
   const store = new SettingsStore(join(dir, 'settings.sqlite'));
@@ -48,14 +48,26 @@ async function setup(publicAccess = false) {
   managers.push(manager);
   const access = createAccessPolicy(
     4317,
-    publicAccess ? { publicOrigin: 'https://arena.example.com', publicAccess: true } : {},
+    published
+      ? {
+          publicOrigin: 'https://arena.example.com',
+          username: 'owner',
+          password: 'private-test-password',
+        }
+      : {},
   );
   const app = createApp(manager, store, 4317, access);
   const request = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
     app.request('/api' + path, {
       method,
       headers: {
-        host: publicAccess ? 'arena.example.com' : '127.0.0.1:4317',
+        host: published ? 'arena.example.com' : '127.0.0.1:4317',
+        ...(published
+          ? {
+              authorization:
+                'Basic ' + Buffer.from('owner:private-test-password').toString('base64'),
+            }
+          : {}),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -222,7 +234,7 @@ describe('persistent connection settings', () => {
     expect(decisions).toBe(2);
   });
 
-  it('allows public settings without administrator setup and never returns saved keys', async () => {
+  it('allows authenticated private settings without administrator setup and never returns saved keys', async () => {
     const { store, request } = await setup(true);
     const created = await request('/settings/connections', input());
     expect(created.status).toBe(201);
@@ -290,7 +302,10 @@ describe('persistent connection settings', () => {
       (
         await app.request('/api/settings/connections/id', {
           method: 'PUT',
-          headers: { host: 'arena.example.com' },
+          headers: {
+            host: 'arena.example.com',
+            authorization: 'Basic ' + Buffer.from('owner:private-test-password').toString('base64'),
+          },
           body: '{}',
         })
       ).status,

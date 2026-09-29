@@ -16,11 +16,11 @@ export function ProtocolSettings({
   readOnly = false,
 }: {
   t: Translate;
+  readOnly?: boolean;
   type: ModelType;
   revision: number;
   onChanged: () => Promise<void>;
   onOpenProviders: () => void;
-  readOnly?: boolean;
 }) {
   const [providers, setProviders] = useState<EditableProvider[]>([]);
   const [models, setModels] = useState<StoredModel[]>([]);
@@ -77,15 +77,10 @@ export function ProtocolSettings({
           : t('LLM model options', 'LLM 모델 옵션')}
       </h2>
       <p className="hint">
-        {readOnly
-          ? t(
-              'Choose a model to inspect its saved options. Demo settings are read-only.',
-              '모델을 선택해 저장된 옵션을 확인하세요. 데모 설정은 읽기 전용입니다.',
-            )
-          : t(
-              'Choose a model to edit its options. Changes apply only to that model, starting with the next match or benchmark.',
-              '모델을 선택해 해당 모델의 옵션을 편집하세요. 변경 사항은 해당 모델에만 적용되며 다음 경기·벤치마크부터 사용합니다.',
-            )}
+        {t(
+          'Choose a model to edit its options. Changes apply only to that model, starting with the next match or benchmark.',
+          '모델을 선택해 해당 모델의 옵션을 편집하세요. 변경 사항은 해당 모델에만 적용되며 다음 경기·벤치마크부터 사용합니다.',
+        )}
       </p>
       {error && (
         <p className="error" role="alert">
@@ -156,8 +151,8 @@ export function ProtocolSettings({
             </div>
             <ModelOptions
               model={model}
-              t={t}
               readOnly={readOnly}
+              t={t}
               onSaved={async (updated, removedId) => {
                 setModels((previous) =>
                   updated
