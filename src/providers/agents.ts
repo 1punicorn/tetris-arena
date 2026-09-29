@@ -10,8 +10,71 @@ import { z } from 'zod';
 import type { DecisionAgent, DecisionProblem, DecisionResult } from '../core/types.js';
 import { random } from '../core/random.js';
 import { apiKeyFor, type Profile, validateEndpoint } from './config.js';
+import { redactParameters } from './model-settings.js';
 
 import { ModelError } from '../core/errors.js';
+export const OUTPUT_INSTRUCTION =
+  ' Return only JSON with one key "choice" containing an offered option ID.';
+export function modelInstruction(problem: DecisionProblem, profile: Profile) {
+  return (
+    problem.instruction +
+    (profile.additionalInstructions ? `\n\n${profile.additionalInstructions}` : '')
+  );
+}
+
+function mergeParameters(
+  original: Record<string, unknown>,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...original };
+  for (const [key, value] of Object.entries(extra)) {
+    const previous = merged[key];
+    merged[key] =
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      previous &&
+      typeof previous === 'object' &&
+      !Array.isArray(previous)
+        ? mergeParameters(previous as Record<string, unknown>, value as Record<string, unknown>)
+        : value;
+  }
+  return merged;
+}
+// Nested generation options preserve the engine-owned response schema.
+function requestTransport(profile: Profile, transport: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (!Object.keys(profile.requestBody).length) return transport(input, init);
+    if (typeof init?.body !== 'string') throw new ModelError('unsupported_request_body');
+    return transport(input, {
+      ...init,
+      body: JSON.stringify(mergeParameters(JSON.parse(init.body), profile.requestBody)),
+    });
+  };
+}
+
+export async function previewRequest(profile: Profile, problem: DecisionProblem) {
+  let captured: { endpoint: string; body: unknown } | undefined;
+  // Exercise exactly the same serializers as inference, stopping at the transport.
+  const capture: typeof fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    captured = {
+      endpoint: `${url.origin}${url.pathname}`,
+      body: redactParameters(JSON.parse(String(init?.body))),
+    };
+    throw new ModelError('preview_complete');
+  };
+  try {
+    await createAgent(profile.id, [profile], 'preview', capture, true).decide(
+      problem,
+      AbortSignal.timeout(10000),
+    );
+  } catch (error) {
+    if (!captured) throw error;
+  }
+  if (!captured) throw new ModelError('preview_unavailable');
+  return captured;
+}
 export const boundedFetch: typeof fetch = async (input, init) => {
   const url = input instanceof Request ? input.url : String(input);
   validateEndpoint(url.split('?')[0]);
@@ -45,7 +108,11 @@ export const boundedFetch: typeof fetch = async (input, init) => {
     headers,
   });
 };
-function languageModel(profile: Profile, transport: typeof fetch): LanguageModel {
+function languageModel(
+  profile: Profile,
+  transport: typeof fetch,
+  previewOnly = false,
+): LanguageModel {
   const settings = {
     apiKey: apiKeyFor(profile),
     baseURL: profile.baseURL,
@@ -72,12 +139,29 @@ function languageModel(profile: Profile, transport: typeof fetch): LanguageModel
         apiVersion: profile.apiVersion,
       })(profile.model);
     case 'bedrock':
-      return createAmazonBedrock({ ...settings, region: profile.region })(profile.model);
+      return createAmazonBedrock({
+        ...settings,
+        ...(previewOnly ? { apiKey: 'preview-only' } : {}),
+        region: profile.region,
+      })(profile.model);
     case 'vertex':
       return createGoogleVertex({
         ...settings,
         project: profile.project,
         location: profile.location,
+        // Preserve the normal Vertex endpoint/body while avoiding ADC token
+        // refresh or metadata-server requests during a local preview.
+        ...(previewOnly
+          ? {
+              googleAuthOptions: {
+                authClient: {
+                  getAccessToken: async () => ({ token: 'preview-only' }),
+                } as NonNullable<
+                  NonNullable<Parameters<typeof createGoogleVertex>[0]>['googleAuthOptions']
+                >['authClient'],
+              },
+            }
+          : {}),
       })(profile.model);
     default:
       throw new ModelError('not_a_language_model');
@@ -88,6 +172,7 @@ export function createAgent(
   profiles: Profile[],
   seed: string,
   transport: typeof fetch = boundedFetch,
+  previewOnly = false,
 ): DecisionAgent {
   const rng = random(`${seed}:${id}`);
   if (id === 'random' || id === 'heuristic')
@@ -115,6 +200,7 @@ export function createAgent(
     };
   const profile = profiles.find((p) => p.id === id);
   if (!profile) throw new ModelError('unknown_connection');
+  const send = requestTransport(profile, transport);
   if (profile.apiKeyEnv && !apiKeyFor(profile)) throw new ModelError('missing_credential');
   if (
     profile.provider !== 'openrouter-decisions' &&
@@ -130,7 +216,7 @@ export function createAgent(
       const choices = Object.keys(problem.options);
       if (choices.length < 2) throw new ModelError('requires_multiple_choices');
       if (profile.provider === 'openrouter-decisions') {
-        const response = await transport('https://openrouter.ai/api/alpha/decisions', {
+        const response = await send('https://openrouter.ai/api/alpha/decisions', {
           method: 'POST',
           signal,
           headers: {
@@ -143,7 +229,7 @@ export function createAgent(
             questions: {
               action: {
                 type: 'choice',
-                instructions: problem.instruction,
+                instructions: modelInstruction(problem, profile),
                 criteria: problem.options,
               },
             },
@@ -186,22 +272,21 @@ export function createAgent(
       }
       const schema = z.object({ choice: z.enum(choices as [string, ...string[]]) }).strict();
       const result = await generateText({
-        model: languageModel(profile, transport),
+        model: languageModel(profile, send, previewOnly),
         maxRetries: 0,
         abortSignal: signal,
-        maxOutputTokens: 1024,
+        ...profile.generation,
+        maxOutputTokens: profile.generation.maxOutputTokens ?? undefined,
         reasoning:
           profile.reasoning === 'off'
             ? 'none'
             : profile.reasoning === 'on'
-              ? 'medium'
+              ? profile.generation.reasoningEffort
               : 'provider-default',
         providerOptions: profile.providerOptions as NonNullable<
           Parameters<typeof generateText>[0]['providerOptions']
         >,
-        system:
-          problem.instruction +
-          ' Return only JSON with one key "choice" containing an offered option ID.',
+        system: modelInstruction(problem, profile) + OUTPUT_INSTRUCTION,
         prompt: JSON.stringify({ state: problem.state, options: problem.options }),
         ...(profile.output === 'schema' ? { output: Output.object({ schema }) } : {}),
       });

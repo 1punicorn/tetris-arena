@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { ModelError } from '../core/errors.js';
+import { modelExperimentFields, ProviderOptionsSchema } from './model-settings.js';
 
 export const ProfileSchema = z
   .object({
+    ...modelExperimentFields,
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
     name: z.string().min(1).max(120),
     provider: z.enum([
@@ -27,7 +29,7 @@ export const ProfileSchema = z
     // Compatibility is a property of an endpoint/model, not its name.
     reasoningOffSupported: z.boolean().default(false),
     output: z.enum(['schema', 'json-text']).default('schema'),
-    providerOptions: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+    providerOptions: ProviderOptionsSchema,
     region: z.string().optional(),
     project: z.string().optional(),
     location: z.string().optional(),

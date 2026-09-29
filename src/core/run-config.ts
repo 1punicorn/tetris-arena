@@ -35,6 +35,11 @@ export const BenchConfigSchema = z
     'Use distinct AI connections',
   );
 export type BenchConfig = z.infer<typeof BenchConfigSchema>;
+export type BenchmarkState = {
+  config: BenchConfig;
+  status: 'running' | 'completed' | 'cancelled' | 'failed';
+  currentRunId: string | null;
+};
 export function schedule(config: BenchConfig): RunConfig[] {
   const runs: RunConfig[] = [];
   for (let a = 0; a < config.models.length; a++)

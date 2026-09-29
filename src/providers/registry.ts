@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { providerPresets, type ProviderKind } from './presets.js';
+import { modelExperimentFields, ProviderOptionsSchema } from './model-settings.js';
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 export const ProviderInputSchema = z
@@ -32,6 +33,7 @@ export type EditableProvider = Omit<StoredProvider, 'apiKey' | 'apiKeyEnv'> & {
 };
 export const ModelInputSchema = z
   .object({
+    ...modelExperimentFields,
     model: z.string().trim().min(1).max(256),
     name: z.string().trim().min(1).max(120),
     enabled: z.boolean().default(true),
@@ -39,7 +41,7 @@ export const ModelInputSchema = z
     reasoning: z.enum(['off', 'on', 'provider-default']).default('provider-default'),
     reasoningOffSupported: z.boolean().default(false),
     output: z.enum(['schema', 'json-text']).default('schema'),
-    providerOptions: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+    providerOptions: ProviderOptionsSchema,
   })
   .strict();
 export type ModelInput = z.infer<typeof ModelInputSchema>;

@@ -25,6 +25,7 @@ import {
   type EditableProvider,
 } from '../providers/registry.js';
 import { ModelError } from '../core/errors.js';
+import { ExperimentSchema } from '../core/experiment.js';
 
 export class SettingsStore {
   private db: DatabaseSync;
@@ -88,6 +89,15 @@ export class SettingsStore {
         'INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
       )
       .run(key, value);
+  }
+  experiment() {
+    const saved = this.getSetting('experiment');
+    return ExperimentSchema.parse(saved ? JSON.parse(saved) : {});
+  }
+  saveExperiment(raw: unknown) {
+    const settings = ExperimentSchema.parse(raw);
+    this.setSetting('experiment', JSON.stringify(settings));
+    return settings;
   }
   private allProviders(): StoredProvider[] {
     return this.db
@@ -302,7 +312,18 @@ export class SettingsStore {
       provider = { ...input, id: randomUUID() };
       this.putProvider(provider);
     }
-    const { id, name, model, reasoning, reasoningOffSupported, output, providerOptions } = profile;
+    const {
+      id,
+      name,
+      model,
+      reasoning,
+      reasoningOffSupported,
+      output,
+      providerOptions,
+      additionalInstructions,
+      generation,
+      requestBody,
+    } = profile;
     const stored = StoredModelSchema.parse({
       id,
       providerId: provider.id,
@@ -312,6 +333,9 @@ export class SettingsStore {
       reasoningOffSupported,
       output,
       providerOptions,
+      additionalInstructions,
+      generation,
+      requestBody,
       api: profile.provider === 'openrouter-decisions' ? 'decisions' : 'default',
     });
     this.compile(provider, stored);
@@ -350,7 +374,17 @@ export class SettingsStore {
         for (const sibling of this.models(previous.providerId).filter((m) => m.id !== id))
           this.compile(provider, sibling);
         this.putProvider(provider);
-        const { name, model, reasoning, reasoningOffSupported, output, providerOptions } = profile;
+        const {
+          name,
+          model,
+          reasoning,
+          reasoningOffSupported,
+          output,
+          providerOptions,
+          additionalInstructions,
+          generation,
+          requestBody,
+        } = profile;
         this.saveModel(
           previous.providerId,
           {
@@ -360,6 +394,9 @@ export class SettingsStore {
             reasoningOffSupported,
             output,
             providerOptions,
+            additionalInstructions,
+            generation,
+            requestBody,
             api: profile.provider === 'openrouter-decisions' ? 'decisions' : 'default',
           },
           id,

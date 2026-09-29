@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   emptyGame,
@@ -11,8 +11,10 @@ import {
 } from '../core/engine.js';
 import type { Snapshot } from '../core/runner.js';
 import { api } from './api.js';
-import { ModelSettings } from './settings.js';
+import { Settings } from './experiment-settings.js';
 import { ModelPicker } from './model-picker.js';
+import { Benchmark, type BenchmarkDraft } from './benchmark.js';
+import type { BenchmarkState } from '../core/run-config.js';
 import './style.css';
 
 type Connection = {
@@ -29,6 +31,7 @@ type Connection = {
 type State = {
   snapshot: Snapshot | null;
   progress: { total: number; completed: number; active: boolean };
+  benchmark: BenchmarkState | null;
   error: string | null;
 };
 function Preview({ kind }: { kind: Kind | null }) {
@@ -59,14 +62,20 @@ function Board({ game }: { game: Game }) {
     </div>
   );
 }
-type Page = 'arena' | 'results' | 'settings';
+type Page = 'arena' | 'benchmark' | 'results' | 'settings';
 function currentPage(): Page {
   const hash = window.location.hash;
-  return hash === '#settings' ? 'settings' : hash === '#results' ? 'results' : 'arena';
+  return hash === '#settings'
+    ? 'settings'
+    : hash === '#results'
+      ? 'results'
+      : hash === '#benchmark'
+        ? 'benchmark'
+        : 'arena';
 }
 function App() {
   const [ko, setKo] = useState(false),
-    t = (en: string, kr: string) => (ko ? kr : en);
+    t = useCallback((en: string, kr: string) => (ko ? kr : en), [ko]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   );
@@ -96,6 +105,7 @@ function App() {
   const [state, setState] = useState<State>({
       snapshot: null,
       progress: { total: 0, completed: 0, active: false },
+      benchmark: null,
       error: null,
     }),
     [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>(
@@ -107,12 +117,18 @@ function App() {
   const [frames, setFrames] = useState<Snapshot[]>([]),
     [frame, setFrame] = useState(0),
     [replayPlaying, setReplayPlaying] = useState(false);
-  const [benchModels, setBenchModels] = useState<string[]>([]),
-    [seeds, setSeeds] = useState('1,2,3,4,5');
+  const [benchDraft, setBenchDraft] = useState<BenchmarkDraft>({
+    models: [],
+    seeds: '1,2,3,4,5',
+    maxTurns: null,
+  });
   const active =
     state.progress.active ||
     (!!state.snapshot && ['playing', 'paused'].includes(state.snapshot.status));
   const shown = frames.length ? frames[frame] : state.snapshot;
+  const liveConfig = active ? state.snapshot?.config : undefined;
+  const arenaPlayers = liveConfig?.players ?? players;
+  const arenaMode = liveConfig?.mode ?? mode;
   const registeredModels = connections.filter((c) => c.provider !== 'baseline');
   const canStart = players.every(
     (id, index) =>
@@ -139,7 +155,10 @@ function App() {
     const ids = new Set(
       latest.filter((c) => c.provider !== 'baseline' && c.available).map((c) => c.id),
     );
-    setBenchModels((previous) => previous.filter((id) => ids.has(id)));
+    setBenchDraft((previous) => ({
+      ...previous,
+      models: previous.models.filter((id) => ids.has(id)),
+    }));
   };
   const perform = async (fn: () => Promise<unknown>) => {
     setPending(true);
@@ -167,12 +186,15 @@ function App() {
       .then((latest) => {
         setConnections(latest);
         setConnectionsLoaded(true);
-        setBenchModels(
-          latest
-            .filter((c) => c.provider !== 'baseline' && c.available)
-            .slice(0, 2)
-            .map((c) => c.id),
-        );
+        setBenchDraft((previous) => ({
+          ...previous,
+          models: previous.models.length
+            ? previous.models
+            : latest
+                .filter((c) => c.provider !== 'baseline' && c.available)
+                .slice(0, 2)
+                .map((c) => c.id),
+        }));
       })
       .catch((e) => setError(e.message));
     void refresh();
@@ -187,7 +209,7 @@ function App() {
   useEffect(() => {
     const config = state.snapshot?.config;
     // Completed runs describe history; only restore a match that is still running.
-    if (config && state.snapshot?.status !== 'finished') {
+    if (config && state.snapshot?.status !== 'finished' && !state.progress.active) {
       setPlayers(config.players);
       setMode(config.mode);
       setSeed(config.seed);
@@ -195,6 +217,17 @@ function App() {
       setTurns(config.maxTurns);
     }
   }, [state.snapshot?.id]);
+  const batchConfigKey =
+    state.benchmark?.status === 'running' ? JSON.stringify(state.benchmark.config) : '';
+  useEffect(() => {
+    if (!batchConfigKey) return;
+    const config = JSON.parse(batchConfigKey) as BenchmarkState['config'];
+    setBenchDraft({
+      models: config.models,
+      seeds: config.seeds.join(','),
+      maxTurns: config.run.maxTurns,
+    });
+  }, [batchConfigKey]);
   useEffect(() => {
     document.documentElement.lang = ko ? 'ko' : 'en';
   }, [ko]);
@@ -298,6 +331,9 @@ function App() {
           <a href="#arena" aria-current={page === 'arena' ? 'page' : undefined}>
             {t('Arena', '대전')}
           </a>
+          <a href="#benchmark" aria-current={page === 'benchmark' ? 'page' : undefined}>
+            {t('Benchmark', '벤치마크')}
+          </a>
           <a href="#results" aria-current={page === 'results' ? 'page' : undefined}>
             {t('Results', '결과')}
           </a>
@@ -356,12 +392,14 @@ function App() {
               ? t('Settings', '설정')
               : page === 'results'
                 ? t('Results & replay', '결과 및 다시 보기')
-                : t('Arena', '대전')}
+                : page === 'benchmark'
+                  ? t('Benchmark', '벤치마크')
+                  : t('Arena', '대전')}
           </h1>
           <p>
             {page === 'settings'
               ? t(
-                  'Manage the models you want to benchmark.',
+                  'Configure providers, models and playing strategies.',
                   '벤치마크에 사용할 모델과 연결을 관리하세요.',
                 )
               : page === 'results'
@@ -369,10 +407,15 @@ function App() {
                     'Review completed matches, replay decisions and export results.',
                     '완료된 경기를 다시 보고 결과를 내보내세요.',
                   )
-                : t(
-                    'Run matches and compare model decisions.',
-                    '모델을 대전시키고 판단 결과를 비교하세요.',
-                  )}
+                : page === 'benchmark'
+                  ? t(
+                      'Compare models through repeated turn-based matches.',
+                      '턴제 반복 대전으로 모델의 판단과 전략을 비교하세요.',
+                    )
+                  : t(
+                      'Run matches and compare model decisions.',
+                      '모델을 대전시키고 판단 결과를 비교하세요.',
+                    )}
           </p>
         </div>
         {page === 'arena' && (
@@ -387,7 +430,43 @@ function App() {
         </div>
       )}
       {page === 'settings' ? (
-        <ModelSettings t={t} onChanged={refreshConnections} />
+        <Settings t={t} onChanged={refreshConnections} />
+      ) : page === 'benchmark' ? (
+        <Benchmark
+          t={t}
+          models={registeredModels}
+          draft={benchDraft}
+          onChange={setBenchDraft}
+          benchmark={state.benchmark}
+          progress={state.progress}
+          snapshot={state.snapshot}
+          active={active}
+          pending={pending}
+          connected={connectionStatus === 'connected'}
+          onStart={() =>
+            void perform(async () => {
+              setFrames([]);
+              setReplayPlaying(false);
+              await api('/bench', {
+                models: benchDraft.models,
+                seeds: benchDraft.seeds
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+                run: {
+                  mode: 'decision',
+                  maxTurns: benchDraft.maxTurns,
+                },
+              });
+            })
+          }
+          onStop={() => void perform(async () => setState(await api<State>('/cancel', {})))}
+          onWatch={() => {
+            setFrames([]);
+            setReplayPlaying(false);
+            window.location.hash = 'arena';
+          }}
+        />
       ) : page === 'results' ? (
         <section className="content-section results-section">
           <div className="section-title">
@@ -422,6 +501,9 @@ function App() {
                   <a href={`/api/results/${s.id}/summary.json`} target="_blank" rel="noreferrer">
                     JSON ↗
                   </a>
+                  <a href={`/api/results/${s.id}/metadata.json`} target="_blank" rel="noreferrer">
+                    {t('Prompts & settings', '프롬프트 및 설정')} ↗
+                  </a>
                 </div>
               ))}
             </div>
@@ -435,7 +517,7 @@ function App() {
                 {t('Mode', '모드')}
                 <select
                   aria-label="Mode"
-                  value={mode}
+                  value={arenaMode}
                   disabled={active}
                   onChange={(e) => setMode(e.target.value as typeof mode)}
                 >
@@ -447,23 +529,31 @@ function App() {
                 {t('Seed', '시드')}
                 <input
                   aria-label="Seed"
-                  value={seed}
+                  value={liveConfig?.seed ?? seed}
                   maxLength={100}
                   disabled={active}
                   onChange={(e) => setSeed(e.target.value)}
                 />
               </label>
               <label>
-                {mode === 'realtime'
+                {arenaMode === 'realtime'
                   ? t('Time limit (s)', '제한 시간 (초)')
                   : t('Turn limit', '최대 턴')}
                 <input
                   aria-label="Run limit"
                   type="number"
                   min="1"
-                  max={mode === 'realtime' ? 600 : 2000}
+                  max={arenaMode === 'realtime' ? 600 : 2000}
                   disabled={active}
-                  value={(mode === 'realtime' ? limit : turns) ?? ''}
+                  value={
+                    (liveConfig
+                      ? arenaMode === 'realtime'
+                        ? liveConfig.maxSeconds
+                        : liveConfig.maxTurns
+                      : mode === 'realtime'
+                        ? limit
+                        : turns) ?? ''
+                  }
                   placeholder={t('Unlimited', '무제한')}
                   onChange={(e) =>
                     (mode === 'realtime' ? setLimit : setTurns)(
@@ -485,7 +575,7 @@ function App() {
                 {t('Start match', '대전 시작')}
               </button>
               <button
-                disabled={!active || mode === 'decision'}
+                disabled={!active || arenaMode === 'decision'}
                 onClick={() => void perform(() => api('/pause', {}))}
               >
                 {state.snapshot?.status === 'paused'
@@ -493,11 +583,11 @@ function App() {
                   : t('Pause', '일시 정지')}
               </button>
               <button disabled={!active} onClick={() => void perform(() => api('/cancel', {}))}>
-                {t('Stop', '종료')}
+                {state.progress.active ? t('Stop benchmark', '벤치마크 중단') : t('Stop', '종료')}
               </button>
             </div>
             <p className="hint">
-              {mode === 'realtime'
+              {arenaMode === 'realtime'
                 ? t(
                     'Gravity keeps moving while models respond. Failures retry every 0.5 seconds.',
                     '모델이 응답하는 동안에도 블록은 내려갑니다. 오류는 0.5초 간격으로 재시도합니다.',
@@ -525,11 +615,15 @@ function App() {
               {t('Turn', '턴')} {shown?.turn ?? 0} <b>·</b>{' '}
               {((shown?.elapsedMs ?? 0) / 1000).toFixed(1)}s
             </span>
-            <span>
-              {state.progress.active
-                ? `${state.progress.completed + 1} / ${state.progress.total}`
-                : t('2 / 3 / 4 lines → 1 / 2 / 3 attack', '2 / 3 / 4줄 제거 → 1 / 2 / 3줄 공격')}
-            </span>
+            {state.progress.active ? (
+              <a className="page-link" href="#benchmark">
+                {t('Benchmark', '벤치마크')} · {state.progress.completed} / {state.progress.total} →
+              </a>
+            ) : (
+              <span>
+                {t('2 / 3 / 4 lines → 1 / 2 / 3 attack', '2 / 3 / 4줄 제거 → 1 / 2 / 3줄 공격')}
+              </span>
+            )}
           </div>
           {frames.length > 0 && (
             <div className="replay">
@@ -559,7 +653,7 @@ function App() {
           )}
           <section className="arena">
             {[0, 1].map((p) => {
-              const selected = connections.find((c) => c.id === players[p]),
+              const selected = connections.find((c) => c.id === arenaPlayers[p]),
                 game = shown?.games[p] ?? emptyGame(),
                 stats = shown?.stats[p];
               return (
@@ -571,20 +665,21 @@ function App() {
                       <ModelPicker
                         label={`Player ${p + 1}`}
                         t={t}
-                        value={[players[p]]}
+                        value={[arenaPlayers[p]]}
                         disabled={active}
                         options={[
                           ...connections.filter(
-                            (c) => c.provider !== 'baseline' || (active && c.id === players[p]),
+                            (c) =>
+                              c.provider !== 'baseline' || (active && c.id === arenaPlayers[p]),
                           ),
-                          ...(mode === 'realtime'
+                          ...(arenaMode === 'realtime'
                             ? [
                                 {
                                   id: 'human',
                                   name: t('Human', '사람'),
                                   model: 'human',
                                   provider: 'local',
-                                  available: players[1 - p] !== 'human',
+                                  available: arenaPlayers[1 - p] !== 'human',
                                 },
                               ]
                             : []),
@@ -610,7 +705,7 @@ function App() {
                     </div>
                   </div>
                   <div className="model-info" title={stats?.actualModel ?? selected?.model}>
-                    {stats?.actualModel ?? selected?.model ?? players[p]}
+                    {stats?.actualModel ?? selected?.model ?? arenaPlayers[p]}
                     <span>
                       {stats?.provider ?? selected?.provider ?? 'local'} · {t('reasoning', '추론')}{' '}
                       {selected?.reasoning ?? 'off'}
@@ -698,7 +793,7 @@ function App() {
                       </p>
                     ))}
                   </details>
-                  {players[p] === 'human' && (
+                  {arenaPlayers[p] === 'human' && (
                     <div className="human-controls">
                       {(
                         ['left', 'counterclockwise', 'clockwise', 'right', 'hold', 'drop'] as const
@@ -717,62 +812,6 @@ function App() {
                 </article>
               );
             })}
-          </section>
-          <section className="content-section benchmark">
-            <div>
-              <h2>{t('Paired benchmark', '반복 벤치마크')}</h2>
-              <p className="hint">
-                {t(
-                  'Every pair, identical seeds, swapped sides. Each mode is reported separately.',
-                  '모든 모델 조합을 같은 시드에서 양쪽 자리를 바꾸어 평가합니다.',
-                )}
-              </p>
-            </div>
-            <div className="benchmark-form">
-              <ModelPicker
-                label={t('Benchmark models', '벤치마크 모델')}
-                t={t}
-                options={registeredModels.filter((c) => c.available)}
-                value={benchModels}
-                onChange={setBenchModels}
-                multiple
-                disabled={active}
-              />
-              <div className="bench-controls">
-                <label>
-                  {t('Seeds (comma separated)', '시드 (쉼표로 구분)')}
-                  <input
-                    value={seeds}
-                    disabled={active}
-                    onChange={(e) => setSeeds(e.target.value)}
-                  />
-                </label>
-                <span>
-                  {benchModels.length *
-                    (benchModels.length - 1) *
-                    seeds.split(',').filter((s) => s.trim()).length}{' '}
-                  {t('matches', '경기')} · {mode}
-                </span>
-                <button
-                  disabled={active || pending || benchModels.length < 2}
-                  onClick={() =>
-                    void perform(async () => {
-                      setFrames([]);
-                      await api('/bench', {
-                        models: benchModels,
-                        seeds: seeds
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                        run: runConfig,
-                      });
-                    })
-                  }
-                >
-                  {t('Run benchmark', '벤치마크 실행')}
-                </button>
-              </div>
-            </div>
           </section>
           <section className="content-section connections">
             <h2>{t('Add your models', '내 모델 연결하기')}</h2>

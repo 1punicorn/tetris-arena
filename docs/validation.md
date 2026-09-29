@@ -59,6 +59,18 @@ On the deployed site, the upgrade preserved all four existing model IDs, credent
 
 The arena and benchmark selectors now omit heuristic and seeded-random baselines, which remain available through the API/CLI. Chromium verifies registered-model defaults, provider-only benchmark options and the empty-model state, including disabling model matches and switching away from human play in decision mode. Arena play tests use a local provider fixture; no paid model is needed. Each test run uses an isolated settings database and results directory.
 
+## Editable prompt experiments
+
+Protocol tests compare the preview body with the actual request body for both native Decisions and Chat Completions. They verify replacement of all common prompt sections, per-model additions, legal-option preservation, sampling/token parameter serialization, raw overrides, nested Gemini output-schema preservation and credential redaction. Cloud previews also bypass credential-chain token acquisition without changing the normal Vertex endpoint. These fixtures do not measure strategy quality.
+
+SQLite/API tests verify draft previews do not save edits, settings survive reopening the database, explicit run values override defaults, and a paired batch keeps its original prompts after settings change. Artifact version 2 saves editable prompts and redacted model parameters. Chromium exercises the attack preset, restoration as an unsaved draft, save/reload, per-model options, preview without inference, fixture inference, result metadata and 320/390px layouts in light/dark themes.
+
+Protocol settings checks cover Decisions/LLM tabs with one selected model editor, a searchable picker, keyboard navigation, drafts retained across model/tab switches, saving one model without changing others, distinct serialized preview formats, save/reload and a Korean dark-theme layout at 320px. Default/reset checks verify the 1024-token limit and structured output, omission of empty sampling/token fields in serialized requests, and that resetting does not save automatically. Preview fixtures do not call external models.
+
+## Benchmark tab
+
+Server tests cover the batch descriptor in `/api/state`, frozen execution settings, completion and cancellation, including preserving a past batch's status when a later arena match runs. Chromium runs a real local-fixture batch from the dedicated tab, verifies fixed decision mode with independent arena/benchmark limits and no time limit, restores active settings after reload, exits a historical replay through **Watch current match**, and checks all four paired results. It also tests empty-seed validation, cancelling both the current game and remaining schedule, and English/Korean light/dark layouts at 320, 390 and 640px. No paid model calls are required.
+
 ## Line-clear policy regression
 
 An archived v1 decision-mode Jev vs DeepSeek game (seed `1`) ended after 21 placements: Jev cleared no lines, despite having reachable clearing candidates from placement 6 onward. At placement 13 it passed up a three-line clear that would have lowered its board from height 8 to 5 and reduced holes from 2 to 1. Gravity was frozen and there were no request failures or stale answers. The v1 instructions explicitly preferred Tetris preparation to small clears and lowering the board.

@@ -114,13 +114,19 @@ test('connects a provider once, enables searchable models and uses the shared ke
     await search.press('Enter');
     await page.getByLabel('Mode', { exact: true }).selectOption('decision');
     await page.getByLabel('Run limit').fill('1');
+    const started = page.waitForResponse(
+      (response) => response.url().endsWith('/api/runs') && response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: 'Start match' }).click();
+    expect((await started).status()).toBe(201);
+    await expect.poll(() => observed.length).toBe(2);
     await expect(page.locator('.status')).toHaveText('turn_limit');
     expect(observed).toHaveLength(2);
     expect(observed[1]).toEqual({
       model: 'manual-model',
       authorization: 'Bearer browser-fixture-key',
     });
+    await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
     await page.getByRole('button', { name: 'Benchmark models', exact: true }).click();
     await search.fill('fixture-alpha');
     const option = page.getByRole('listbox').getByRole('option');
@@ -236,6 +242,7 @@ test('searches and navigates a large model dropdown on mobile without moving the
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
   await search.press('Escape');
   await expect(trigger).toBeFocused();
+  await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
   await page.getByRole('button', { name: 'Benchmark models', exact: true }).click();
   await search.fill('Search fixture');
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(100);

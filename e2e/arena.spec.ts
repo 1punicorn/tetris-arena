@@ -69,10 +69,12 @@ test('plays, exports and replays without another inference call', async ({ page,
   await page.getByRole('button', { name: 'Player 1', exact: true }).click();
   await expect(page.getByRole('listbox')).not.toContainText(/Heuristic|Seeded random/);
   await page.getByRole('combobox', { name: 'Search models' }).press('Escape');
+  await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
   await page.getByRole('button', { name: 'Benchmark models', exact: true }).click();
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(2);
   await expect(page.getByRole('listbox')).not.toContainText(/Heuristic|Seeded random/);
   await page.getByRole('combobox', { name: 'Search models' }).press('Escape');
+  await page.getByRole('link', { name: 'Arena', exact: true }).click();
   await page.getByLabel('Mode', { exact: true }).selectOption('decision');
   await page.getByLabel('Run limit').fill('4');
   await page.getByRole('button', { name: 'Start match' }).click();
@@ -224,6 +226,7 @@ test('does not silently choose a baseline when no usable model is registered', a
     'Choose a model',
   );
   await expect(page.getByRole('button', { name: 'Start match' })).toBeDisabled();
+  await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
   await page.getByRole('button', { name: 'Benchmark models', exact: true }).click();
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(0);
 });

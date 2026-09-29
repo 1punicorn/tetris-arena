@@ -12,6 +12,7 @@ import {
 import { placementAction } from './ai-placement.js';
 import { buildCandidates } from './ai-candidates.js';
 import { makeProblem } from './observation.js';
+import { DEFAULT_PROMPTS, type Prompts } from './experiment.js';
 import { random } from './random.js';
 import { POLICY_VERSION } from './policy.js';
 import { safeError } from './errors.js';
@@ -165,6 +166,7 @@ export class Runner {
     private agents: [DecisionAgent | null, DecisionAgent | null],
     private emit: (event: RunEvent) => void = () => {},
     private compute: Compute = async (game) => buildCandidates(game),
+    private prompts: Prompts = DEFAULT_PROMPTS,
   ) {
     this.pieces = [random(config.seed + ':pieces'), random(config.seed + ':pieces')];
     this.garbage = [random(config.seed + ':garbage'), random(config.seed + ':garbage')];
@@ -333,6 +335,7 @@ export class Runner {
         all,
         `${this.config.seed}:options:${this.turn}:${game.pieceId}`,
         this.config.mode,
+        this.prompts,
       );
       const keys = Object.keys(problem.candidates);
       if (!keys.length) throw new Error('no_candidates');

@@ -78,7 +78,7 @@ it('runs a match, persists a replay, exports CSV and rejects traversal', async (
   await expect(manager.artifacts.read('../secrets', '.env')).rejects.toThrow('invalid_artifact');
 });
 it('runs a paired batch and flushes every summary before reporting idle', async () => {
-  const { manager } = await setup();
+  const { manager, app } = await setup();
   const idle = once(manager, 'idle');
   manager.bench(
     BenchConfigSchema.parse({
@@ -90,7 +90,50 @@ it('runs a paired batch and flushes every summary before reporting idle', async 
   );
   await idle;
   expect(manager.progress).toEqual({ total: 2, completed: 2, active: false });
+  const state = await (
+    await app.request('/api/state', { headers: { host: '127.0.0.1:4317' } })
+  ).json();
+  expect(state.benchmark).toMatchObject({
+    status: 'completed',
+    currentRunId: state.snapshot.id,
+    config: {
+      models: ['heuristic', 'random'],
+      seeds: ['1'],
+      run: { mode: 'decision', maxTurns: 2 },
+    },
+  });
   expect(await manager.artifacts.list()).toHaveLength(2);
+});
+it('exposes a running batch configuration and preserves its stopped status during later arena play', async () => {
+  const { manager, app } = await setup();
+  const config = BenchConfigSchema.parse({
+    models: ['heuristic', 'random'],
+    seeds: ['left', 'right'],
+    run: { mode: 'realtime', maxSeconds: 10 },
+  });
+  const started = manager.bench(config, []);
+  config.seeds[0] = 'mutated';
+  const state = await (
+    await app.request('/api/state', { headers: { host: '127.0.0.1:4317' } })
+  ).json();
+  expect(state.progress).toEqual({ total: 4, completed: 0, active: true });
+  expect(state.benchmark).toMatchObject({
+    status: 'running',
+    currentRunId: started.id,
+    config: { seeds: ['left', 'right'] },
+  });
+  const idle = once(manager, 'idle');
+  manager.cancel();
+  await idle;
+  expect(manager.benchmark?.status).toBe('cancelled');
+  expect(manager.progress).toEqual({ total: 4, completed: 0, active: false });
+  expect(await manager.artifacts.list()).toHaveLength(1);
+  const nextIdle = once(manager, 'idle');
+  manager.start(RunConfigSchema.parse({ mode: 'decision', maxTurns: 1, decisionStepMs: 0 }), []);
+  await nextIdle;
+  expect(manager.benchmark?.currentRunId).toBe(started.id);
+  expect(manager.benchmark?.status).toBe('cancelled');
+  expect(manager.progress).toEqual({ total: 4, completed: 0, active: false });
 });
 it('never exposes credentials or provider options in the public catalog', async () => {
   const { store, app } = await setup();

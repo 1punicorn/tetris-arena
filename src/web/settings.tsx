@@ -6,15 +6,23 @@ import {
   type CatalogModel,
   type ProviderKind,
 } from '../providers/presets.js';
-import type {
-  ProviderInput,
-  EditableProvider,
-  StoredModel,
-  ModelInput,
+import {
+  ModelInputSchema,
+  type ProviderInput,
+  type EditableProvider,
+  type StoredModel,
+  type ModelInput,
 } from '../providers/registry.js';
 import { api } from './api.js';
+import { RequestPreview } from './request-preview.js';
 
 type Translate = (en: string, ko: string) => string;
+const DEFAULT_MODEL_OPTIONS = ModelInputSchema.omit({
+  name: true,
+  model: true,
+  enabled: true,
+  api: true,
+}).parse({});
 const fresh = (): ProviderInput => ({
   name: 'OpenAI',
   kind: 'openai',
@@ -74,7 +82,15 @@ function errorText(e: unknown, t: Translate): string {
   );
 }
 
-export function ModelSettings({ t, onChanged }: { t: Translate; onChanged: () => Promise<void> }) {
+export function ModelSettings({
+  t,
+  onChanged,
+  revision = 0,
+}: {
+  t: Translate;
+  onChanged: () => Promise<void>;
+  revision?: number;
+}) {
   const [providers, setProviders] = useState<EditableProvider[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderInput>(fresh);
@@ -131,6 +147,41 @@ export function ModelSettings({ t, onChanged }: { t: Translate; onChanged: () =>
       discovery.current?.abort();
     };
   }, []);
+  useEffect(() => {
+    if (!revision) return;
+    const request = new AbortController();
+    void (async () => {
+      const providers = await api<EditableProvider[]>(
+        '/settings/providers',
+        undefined,
+        undefined,
+        request.signal,
+      );
+      const models = selectedId
+        ? await api<StoredModel[]>(
+            `/settings/providers/${selectedId}/models`,
+            undefined,
+            undefined,
+            request.signal,
+          )
+        : null;
+      if (request.signal.aborted) return;
+      setProviders(providers);
+      if (models) {
+        const enabled = new Set(models.filter((m) => m.enabled).map((m) => `${m.api}:${m.model}`));
+        setSelection((previous) => {
+          const next = new Set(previous);
+          for (const key of applied) if (!enabled.has(key)) next.delete(key);
+          for (const key of enabled) if (!applied.has(key)) next.add(key);
+          return next;
+        });
+        setSaved(models);
+      }
+    })().catch((e) => {
+      if (!request.signal.aborted) setError(errorText(e, t));
+    });
+    return () => request.abort();
+  }, [revision, selectedId]);
   useEffect(() => {
     setVisible(100);
   }, [query, filter]);
@@ -784,7 +835,7 @@ export function ModelSettings({ t, onChanged }: { t: Translate; onChanged: () =>
   );
 }
 
-function ModelOptions({
+export function ModelOptions({
   model,
   t,
   onSaved,
@@ -796,6 +847,18 @@ function ModelOptions({
   const { id, providerId: _providerId, ...initial } = model;
   const [form, setForm] = useState<ModelInput>(initial);
   const [options, setOptions] = useState(JSON.stringify(initial.providerOptions, null, 2));
+  const [requestBody, setRequestBody] = useState(JSON.stringify(initial.requestBody, null, 2));
+  const savedVersion = JSON.stringify(model);
+  useEffect(() => {
+    setForm(initial);
+    setOptions(JSON.stringify(initial.providerOptions, null, 2));
+    setRequestBody(JSON.stringify(initial.requestBody, null, 2));
+  }, [savedVersion]);
+  const draft = () => ({
+    ...form,
+    providerOptions: JSON.parse(options),
+    requestBody: JSON.parse(requestBody),
+  });
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
@@ -818,25 +881,38 @@ function ModelOptions({
       onSubmit={(e) => {
         e.preventDefault();
         void perform(async () => {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(options);
-          } catch {
-            throw new Error('invalid_options');
-          }
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-            throw new Error('invalid_options');
           await onSaved(
-            await api<StoredModel>(
-              `/settings/registered-models/${id}`,
-              { ...form, providerOptions: parsed },
-              'PUT',
-            ),
+            await api<StoredModel>(`/settings/registered-models/${id}`, draft(), 'PUT'),
           );
+          setNotice(t('Options saved.', '옵션을 저장했습니다.'));
         });
       }}
     >
       <fieldset disabled={busy}>
+        <p className="hint">
+          {form.api === 'decisions'
+            ? t(
+                'API type: Decisions · uses state and choice questions. LLM generation, reasoning and output-format settings do not apply.',
+                'API 유형: Decisions · 상태와 선택 질문을 전송합니다. LLM 생성·추론·출력 형식 설정은 적용되지 않습니다.',
+              )
+            : t(
+                'API type: LLM · uses messages and a JSON choice response.',
+                'API 유형: LLM · 메시지를 보내고 JSON 선택 응답을 받습니다.',
+              )}
+        </p>
+        <p className="hint model-defaults">
+          <strong>{t('App defaults', '앱 기본값')}</strong>
+          {' · '}
+          {form.api === 'decisions'
+            ? t(
+                'Uses the common instructions and native choice response. Additional instructions and extra request options are empty.',
+                '공통 지침과 전용 선택 응답 형식을 사용합니다. 모델별 추가 지침과 추가 요청 옵션은 비어 있습니다.',
+              )
+            : t(
+                `Structured output · ${DEFAULT_MODEL_OPTIONS.generation.maxOutputTokens?.toLocaleString()} output tokens · provider-default reasoning. Empty sampling fields are omitted from requests so the API uses its defaults.`,
+                `구조화 출력 · 최대 출력 ${DEFAULT_MODEL_OPTIONS.generation.maxOutputTokens?.toLocaleString()}토큰 · 추론은 공급자 기본값. 비어 있는 샘플링 옵션은 요청에서 생략해 API 기본값을 사용합니다.`,
+              )}
+        </p>
         <div className="connection-fields">
           <label>
             {t('Model display name', '모델 표시 이름')}
@@ -847,55 +923,217 @@ function ModelOptions({
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             />
           </label>
-          <label>
-            {t('Reasoning', '추론')}
-            <select
-              value={form.reasoning}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, reasoning: e.target.value as ModelInput['reasoning'] }))
-              }
-            >
-              <option value="provider-default">{t('Provider default', '공급자 기본값')}</option>
-              <option value="on">{t('On', '켜기')}</option>
-              <option value="off">{t('Off', '끄기')}</option>
-            </select>
-          </label>
-          {form.reasoning === 'off' && (
-            <label className="inline-check full-field">
-              <input
-                type="checkbox"
-                checked={form.reasoningOffSupported}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, reasoningOffSupported: e.target.checked }))
-                }
-              />
-              {t('This model supports disabling reasoning', '이 모델은 추론 끄기를 지원합니다')}
-            </label>
+          {form.api !== 'decisions' && (
+            <>
+              <label>
+                {t('Reasoning', '추론')}
+                <select
+                  value={form.reasoning}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, reasoning: e.target.value as ModelInput['reasoning'] }))
+                  }
+                >
+                  <option value="provider-default">{t('Provider default', '공급자 기본값')}</option>
+                  <option value="on">{t('On', '켜기')}</option>
+                  <option value="off">{t('Off', '끄기')}</option>
+                </select>
+              </label>
+              {form.reasoning === 'on' && (
+                <label>
+                  {t('Reasoning effort', '추론 강도')}
+                  <select
+                    value={form.generation.reasoningEffort}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        generation: {
+                          ...form.generation,
+                          reasoningEffort: e.target
+                            .value as ModelInput['generation']['reasoningEffort'],
+                        },
+                      })
+                    }
+                  >
+                    {['minimal', 'low', 'medium', 'high', 'xhigh'].map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {form.reasoning === 'off' && (
+                <label className="inline-check full-field">
+                  <input
+                    type="checkbox"
+                    checked={form.reasoningOffSupported}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, reasoningOffSupported: e.target.checked }))
+                    }
+                  />
+                  {t('This model supports disabling reasoning', '이 모델은 추론 끄기를 지원합니다')}
+                </label>
+              )}
+              <label>
+                {t('Output format', '출력 형식')}
+                <select
+                  value={form.output}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, output: e.target.value as ModelInput['output'] }))
+                  }
+                >
+                  <option value="schema">Structured output</option>
+                  <option value="json-text">JSON text</option>
+                </select>
+              </label>
+              {(
+                [
+                  ['maxOutputTokens', 'Max output tokens', '최대 출력 토큰', 1, 1000000, 1],
+                  ['temperature', 'Temperature', 'Temperature', 0, 2, 0.01],
+                  ['topP', 'Top P', 'Top P', 0, 1, 0.01],
+                  ['topK', 'Top K', 'Top K', 1, undefined, 1],
+                  ['presencePenalty', 'Presence penalty', 'Presence penalty', -2, 2, 0.01],
+                  ['frequencyPenalty', 'Frequency penalty', 'Frequency penalty', -2, 2, 0.01],
+                  ['seed', 'API seed', 'API 시드', -2147483648, 2147483647, 1],
+                ] as const
+              ).map(([key, en, ko, min, max, step]) => (
+                <label key={key}>
+                  {t(en, ko)}
+                  <input
+                    aria-label={t(en, ko)}
+                    type="number"
+                    min={min}
+                    max={max}
+                    step={step}
+                    placeholder={t('Provider default', '공급자 기본값')}
+                    value={form.generation[key] ?? ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        generation: {
+                          ...form.generation,
+                          [key]:
+                            e.target.value === ''
+                              ? key === 'maxOutputTokens'
+                                ? null
+                                : undefined
+                              : Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                  {key === 'maxOutputTokens' && (
+                    <small>
+                      {t('Clear to use the API default.', '비우면 API 기본값을 사용합니다.')}
+                    </small>
+                  )}
+                </label>
+              ))}
+              <label className="full-field">
+                {t('Stop sequences — one per line', '중지 문자열 — 한 줄에 하나씩')}
+                <textarea
+                  rows={2}
+                  value={form.generation.stopSequences?.join('\n') ?? ''}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      generation: {
+                        ...form.generation,
+                        stopSequences: e.target.value
+                          ? e.target.value.split('\n').filter(Boolean)
+                          : undefined,
+                      },
+                    })
+                  }
+                />
+              </label>
+              <label className="full-field">
+                {t('Provider options (JSON)', '공급자 옵션 (JSON)')}
+                <textarea
+                  rows={3}
+                  spellCheck={false}
+                  value={options}
+                  onChange={(e) => setOptions(e.target.value)}
+                />
+              </label>
+              <p className="hint full-field">
+                {t(
+                  'Empty numeric fields use provider defaults. Parameter support varies by endpoint and model; unsupported values may be ignored or rejected. Preview shows the serialized request. API seed is separate from the game seed.',
+                  '숫자 칸을 비우면 공급자 기본값을 사용합니다. 파라미터 지원은 API와 모델마다 다르며 미지원 값은 무시되거나 오류가 날 수 있습니다. 미리보기에서 전송 내용을 확인하세요. API 시드와 게임 시드는 별개입니다.',
+                )}
+              </p>
+            </>
           )}
-          <label>
-            {t('Output format', '출력 형식')}
-            <select
-              value={form.output}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, output: e.target.value as ModelInput['output'] }))
-              }
-            >
-              <option value="schema">Structured output</option>
-              <option value="json-text">JSON text</option>
-            </select>
+          <label className="full-field">
+            {t('Additional model instructions', '모델별 추가 지침')}
+            <textarea
+              rows={5}
+              maxLength={16000}
+              spellCheck={false}
+              value={form.additionalInstructions}
+              aria-label={t('Additional model instructions', '모델별 추가 지침')}
+              onChange={(e) => setForm({ ...form, additionalInstructions: e.target.value })}
+            />
+            <small>
+              {t(
+                'Appended after common instructions. Can specify this model’s own strategy or exceptions.',
+                '공통 지침 뒤에 추가됩니다. 이 모델만의 전략이나 예외를 명시할 수 있습니다.',
+              )}
+            </small>
           </label>
           <label className="full-field">
-            {t('Provider options (JSON)', '공급자 옵션 (JSON)')}
+            {t('Extra request body (JSON)', '추가 요청 본문 (JSON)')}
             <textarea
-              rows={3}
+              rows={5}
               spellCheck={false}
-              value={options}
-              onChange={(e) => setOptions(e.target.value)}
+              value={requestBody}
+              aria-label={t('Extra request body (JSON)', '추가 요청 본문 (JSON)')}
+              onChange={(e) => setRequestBody(e.target.value)}
             />
+            <small>
+              {t(
+                'Advanced: merged into the final API body, overriding matching parameter values. Model, messages/state, legal choices, streaming and response format are engine-managed. Use the exact parameter names for this API.',
+                '고급: 최종 API 본문에 병합되며 같은 이름의 파라미터 값을 덮어씁니다. 모델·메시지/상태·합법적인 선택지·스트리밍·응답 형식은 엔진이 관리합니다. 해당 API의 정확한 파라미터 이름을 사용하세요.',
+              )}
+            </small>
           </label>
+          {form.api === 'decisions' && (
+            <p className="hint full-field">
+              {t(
+                'Decisions documents provider routing, session_id, trace and user. Temperature and token limits are not documented for this endpoint.',
+                'Decisions 문서에는 provider 라우팅, session_id, trace, user가 제공됩니다. 이 API의 temperature·토큰 제한 지원은 명시되어 있지 않습니다.',
+              )}{' '}
+              <a
+                href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t('API reference', 'API 문서')} ↗
+              </a>
+            </p>
+          )}
         </div>
         <div className="form-actions">
           <button type="submit">{t('Save options', '옵션 저장')}</button>
+          <button
+            type="button"
+            onClick={() => {
+              setForm({
+                ...form,
+                ...structuredClone(DEFAULT_MODEL_OPTIONS),
+              });
+              setOptions(JSON.stringify(DEFAULT_MODEL_OPTIONS.providerOptions, null, 2));
+              setRequestBody(JSON.stringify(DEFAULT_MODEL_OPTIONS.requestBody, null, 2));
+              setNotice(
+                t(
+                  'Defaults restored in the editor. Save to apply.',
+                  '기본값을 불러왔습니다. 저장하면 적용됩니다.',
+                ),
+              );
+            }}
+          >
+            {t('Reset model options', '모델 옵션 초기화')}
+          </button>
           <button
             type="button"
             onClick={() =>
@@ -917,6 +1155,12 @@ function ModelOptions({
           </button>
         </div>
       </fieldset>
+      <RequestPreview
+        t={t}
+        modelId={id}
+        input={() => ({ model: draft() })}
+        revision={JSON.stringify([form, options, requestBody])}
+      />
       <p className="hint">
         {t(
           'Testing sends one decision using saved options and may incur API charges.',

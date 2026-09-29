@@ -3,7 +3,7 @@
 [![CI](https://github.com/hurxxxx/tetris/actions/workflows/ci.yml/badge.svg)](https://github.com/hurxxxx/tetris/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A local Tetris arena for comparing **decision models and LLMs** on the same assisted placement task. Watch AI vs AI, play against a model, or run paired, seeded evaluations from the command line.
+A local Tetris arena for comparing **decision models and LLMs** on the same assisted placement task. Watch AI vs AI, play against a model, or run paired, seeded evaluations from the Benchmark tab or command line.
 
 - **Real-time matches:** gravity runs independently of asynchronous model requests.
 - **Decision evaluation:** freeze gravity, collect both choices, then resolve both placements and attacks together. Model latency does not consume game time.
@@ -49,7 +49,21 @@ Open **Settings** in the header:
 
 Only enabled provider models appear in these pickers. Human play and solo mode are available in the arena; heuristic and seeded-random baselines remain available through the API/CLI for experiments and automated validation. The arena defaults to the first two available registered models, or solo mode when only one is available. Model catalogs can include non-text models or models your account cannot run: known unsupported output types are disabled; a catalog entry is not a guarantee of inference access. Discovery supports paginated Anthropic, Gemini and OpenRouter catalogs. Up to 500 models can be stored per provider. Search covers the whole fetched catalog, including rows not yet displayed.
 
-The **Connection** tab edits a shared key or endpoint for all models of that provider. Empty key fields preserve the stored key; a new value replaces it; **Remove saved key** explicitly deletes it. Keys are never returned to the browser. **Options** on a saved model controls its display name, reasoning, output format and provider options. **Test saved model** sends one real decision using saved options and may incur API charges. Saving settings and browsing catalogs do not perform inference.
+The **Connection** tab edits a shared key or endpoint for all models of that provider. Empty key fields preserve the stored key; a new value replaces it; **Remove saved key** explicitly deletes it. Keys are never returned to the browser. **Options** on a saved model controls its display name, additional instructions and request parameters. LLM options include reasoning effort, output format, output token limit (default 1024; clear to omit), temperature, top P/K, penalties, API seed, stop sequences and SDK provider options. Empty sampling fields use endpoint defaults; supported parameters vary by endpoint and model. **Extra request body** is merged after SDK serialization, recursively overriding matching optional parameters. Required model/input/choice/response fields cannot be overridden. **Request preview** shows the resulting wire body without making an API call. **Test saved model** sends one real decision using saved options and may incur API charges.
+
+### Prompt and strategy experiments
+
+Open **Settings → Prompts & requests** to edit common instructions and strategy priorities. The **Triple / Tetris attack preset** prepares efficient multi-line attacks with recovery conditions; **Reset prompts** restores the existing survival policy. Both buttons change the editor; press **Save prompts & requests** to apply. Expand **Goals, rule descriptions & state legend** to edit all other model-facing descriptions, separately for realtime and decision evaluation. Editing descriptions does not change actual engine mechanics, the observed board, the 26 legal options or the required choice response.
+
+The **Decisions** and **LLM** settings tabs each show one model's options. Choose a registered model in the searchable dropdown; the heading shows its name, ID and provider. Each tab remembers its selection, and drafts stay in place when switching models or settings tabs. Disabled saved models are labelled and can still be edited. The provider catalog's **Options** action also remains available.
+
+New LLM models default to structured output, a 1024-token output limit and provider-default reasoning. Empty sampling fields are omitted so the API chooses its defaults; clearing the token limit also omits it. Decisions uses native choice responses with no optional request parameters by default. **Reset model options** restores application defaults in the editor; save to apply them. Existing saved configurations are preserved.
+
+Model-specific instructions are appended after common instructions. Common strategy edits replace the defaults; the old strategy is not appended secretly. The LLM adapter adds the required JSON-choice instruction; Decisions uses its native choice question. Decisions does not use LLM generation/reasoning/output controls; its extra request body accepts endpoint-specific options. The [Decisions API reference](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request) currently documents provider routing, `session_id`, `trace` and `user`, without documenting temperature or token limits.
+
+Request timeout and evaluation attempts are also editable. Changes are stored in SQLite and apply to the next match or batch. Running batches retain their prompts and model settings across all scheduled matches. The default CLI uses the same settings; an explicit CLI config can include an `experiment` object (`prompts`, `timeoutMs`, `attempts`) to override them. Explicit `run.timeoutMs` and `run.attempts` take precedence. The CLI with `--connections` uses default common prompts unless an experiment is supplied in its config. Game seed and API seed are separate.
+
+Preview uses the current editor values, a sample board, and saved settings from the other settings tab; it does not save drafts. Results link to **Prompts & settings**, a frozen experiment record with prompt text, per-model instructions and redacted request parameters. This makes strategy comparisons inspectable; no improvement in playing strength is implied by a preset.
 
 No source edit, environment variable or restart is required. Deselecting a model keeps its saved ID and options for later re-enabling. Deleting a provider removes its saved models, while historical results remain. Changes apply to future matches; an in-progress match or paired batch keeps its initial configuration.
 
@@ -94,7 +108,9 @@ pnpm bench --config bench.example.json
 pnpm bench --config bench.example.json --connections connections.local.json --out results/experiment-1
 ```
 
-The CLI uses the same saved SQLite connections as the UI. `--connections` explicitly selects a legacy JSON file instead. The example benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with connection IDs from `/api/connections`, or select the models in the UI’s paired benchmark. Each pair is run in both seat orders for every seed. The UI's **Paired benchmark** uses the selected mode and optional limits shown above the arena. New pages default to real-time unlimited play; completed runs never replace a new visitor's mode or limits.
+The CLI uses the same saved SQLite connections as the UI. `--connections` explicitly selects a legacy JSON file instead. The example benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with connection IDs from `/api/connections`, or open the UI's **Benchmark** tab (`/#benchmark`). Each pair is run in both seat orders for every seed.
+
+The Benchmark tab runs turn-based decision evaluation, with its own model selection, seeds and per-match turn limit, independent of the Arena tab. The turn limit defaults to unlimited. Response times are recorded separately. Arena offers both realtime and decision modes; API/CLI benchmarks also support an explicit realtime mode. The form shows the total match count before starting. A batch runs one match at a time on the server, with completed/total progress, current pairing and a **Watch current match** action that opens the live arena. **Stop benchmark** cancels the current match and all remaining matches. Completed records remain in **Results**. Reloading the browser restores an active batch's settings and progress; restarting the server ends the batch. Completed batches do not override a fresh form's defaults.
 
 ```json
 {
@@ -125,15 +141,15 @@ See [methodology](docs/methodology.md) for timing, fairness, game rules and arti
 
 Every run writes a UUID directory under `results/`:
 
-| File            | Contents                                                                                             |
-| --------------- | ---------------------------------------------------------------------------------------------------- |
-| `metadata.json` | Artifact/engine/policy versions, prompt hash, SDK/Node versions, selected profiles and option hashes |
-| `summary.json`  | Seed, configuration, final boards, outcome and per-player metrics                                    |
-| `events.jsonl`  | Timestamped state snapshots and sanitized decision/error events                                      |
+| File            | Contents                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `metadata.json` | Versions, prompt hash, frozen prompts, model instructions, redacted request settings and parameter hashes |
+| `summary.json`  | Seed, configuration, final boards, outcome and per-player metrics                                         |
+| `events.jsonl`  | Timestamped state snapshots and sanitized decision/error events                                           |
 
 CLI also writes `results.csv`. The UI exports a CSV of all finished runs in its configured result directory. Replay reads stored snapshots and makes no model requests. Replay is visual playback, not a second inference run.
 
-Actual response model IDs are recorded when returned. Latency is reported separately for candidate preparation and the provider, with end-to-end last/p50/p95 for valid choices. Cost is **null** when unknown; LLM token counts are not converted using invented prices. Only provider-reported cost is accumulated. Keys, raw provider errors, reasoning text and raw prompts are not written to results. Prompt policy is public source; its hash and policy version identify it. Private endpoint URLs and provider-option contents are represented by hashes rather than exported verbatim.
+Actual response model IDs are recorded when returned. Latency is reported separately for candidate preparation and the provider, with end-to-end last/p50/p95 for valid choices. Cost is **null** when unknown; LLM token counts are not converted using invented prices. Only provider-reported cost is accumulated. Provider keys, raw provider errors and reasoning text are not written to results. Artifact version 2 records editable prompts and optional request parameters so experiments can be reviewed. Known credential/header fields are recursively redacted; private endpoint URLs remain hashed. Prompt text and other parameter values are part of the downloadable experiment record, so do not put credentials in those fields. Old results retain their original metadata format.
 
 ## Architecture
 

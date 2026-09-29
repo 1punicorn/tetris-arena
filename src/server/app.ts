@@ -54,10 +54,7 @@ export function createApp(
   });
   app.use('/api/*', (c, next) =>
     bodyLimit({
-      maxSize:
-        c.req.method === 'PUT' && /^\/api\/settings\/providers\/[^/]+\/models$/.test(c.req.path)
-          ? 262144
-          : 32768,
+      maxSize: c.req.path.startsWith('/api/settings/') ? 262144 : 32768,
       onError: (c) => c.json({ error: 'request_too_large' }, 413),
     })(c, next),
   );
@@ -73,6 +70,7 @@ export function createApp(
   const state = () => ({
     snapshot: manager.snapshot(),
     progress: manager.progress,
+    benchmark: manager.benchmark,
     error: manager.error,
   });
   const requireIdle = () => {
@@ -119,15 +117,32 @@ export function createApp(
   );
   app.post('/api/runs', async (c) => {
     requireIdle();
-    const config = RunConfigSchema.parse(await c.req.json());
+    const experiment = store.experiment();
+    const raw = z.record(z.string(), z.unknown()).parse(await c.req.json());
+    const config = RunConfigSchema.parse({
+      timeoutMs: experiment.timeoutMs,
+      attempts: experiment.attempts,
+      ...raw,
+    });
     verifyOverrides(config.modelOverrides);
-    return c.json(manager.start(config, store.profiles()), 201);
+    return c.json(manager.start(config, store.profiles(), experiment), 201);
   });
   app.post('/api/bench', async (c) => {
     requireIdle();
-    const config = BenchConfigSchema.parse(await c.req.json());
+    const experiment = store.experiment();
+    const raw = z.record(z.string(), z.unknown()).parse(await c.req.json());
+    const run = raw.run === undefined ? {} : z.record(z.string(), z.unknown()).parse(raw.run);
+    const config = BenchConfigSchema.parse({
+      ...raw,
+      run: {
+        mode: 'decision',
+        timeoutMs: experiment.timeoutMs,
+        attempts: experiment.attempts,
+        ...run,
+      },
+    });
     verifyOverrides(config.run.modelOverrides);
-    return c.json(manager.bench(config, store.profiles()), 201);
+    return c.json(manager.bench(config, store.profiles(), experiment), 201);
   });
   app.post('/api/pause', (c) => {
     manager.runner?.pause();

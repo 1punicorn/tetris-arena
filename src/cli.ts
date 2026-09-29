@@ -9,6 +9,7 @@ import { safeError } from './core/errors.js';
 import { Manager } from './server/manager.js';
 import { Artifacts, csv } from './server/artifacts.js';
 import { SettingsStore } from './server/settings-store.js';
+import { ExperimentSchema } from './core/experiment.js';
 
 const { values } = parseArgs({
   options: {
@@ -24,11 +25,9 @@ if (values.help) {
   );
   process.exit(0);
 }
-const config = BenchConfigSchema.parse(
-  values.config
-    ? JSON.parse(await readFile(values.config, 'utf8'))
-    : { models: ['heuristic', 'random'] },
-);
+const rawConfig = values.config
+  ? JSON.parse(await readFile(values.config, 'utf8'))
+  : { models: ['heuristic', 'random'] };
 const output = resolve(values.out ?? process.env.RESULTS_DIR ?? 'results');
 const manager = new Manager(new Artifacts(output));
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => manager.cancel());
@@ -50,7 +49,22 @@ try {
     settings = new SettingsStore(process.env.SETTINGS_DB ?? 'data/settings.sqlite');
     await settings.importLegacy(process.env.CONNECTIONS_FILE);
   }
-  manager.bench(config, settings ? settings.profiles() : await loadProfiles(values.connections));
+  const { experiment: override, ...rawBench } = rawConfig;
+  const experiment = ExperimentSchema.parse(override ?? settings?.experiment() ?? {});
+  const config = BenchConfigSchema.parse({
+    ...rawBench,
+    run: {
+      mode: 'decision',
+      timeoutMs: experiment.timeoutMs,
+      attempts: experiment.attempts,
+      ...rawBench.run,
+    },
+  });
+  manager.bench(
+    config,
+    settings ? settings.profiles() : await loadProfiles(values.connections),
+    experiment,
+  );
   await idle;
   if (manager.error) throw new Error(manager.error);
   const summaries = await manager.artifacts.list();

@@ -2,7 +2,7 @@ import type { Game } from './engine.js';
 import type { Candidate, DecisionProblem, Landing } from './types.js';
 import { shuffled } from './random.js';
 import { boardMetrics } from './board-analysis.js';
-import { INSTRUCTION, RULES, STRATEGY, LEGEND, ATTACK_RULES } from './policy.js';
+import { DEFAULT_PROMPTS, type Prompts } from './experiment.js';
 
 function describe(item: Landing) {
   const wells =
@@ -36,6 +36,7 @@ export function makeProblem(
   all: Candidate[],
   seed: string,
   mode: 'realtime' | 'decision',
+  prompts: Prompts = DEFAULT_PROMPTS,
 ): DecisionProblem {
   const candidates: Record<string, Candidate> = {},
     options: Record<string, string> = {};
@@ -49,34 +50,20 @@ export function makeProblem(
         `\nthen: ${describe(future)} total_clear=${item.cleared_lines + future.cleared_lines} total_attack=${Math.max(0, item.cleared_lines - 1) + Math.max(0, future.cleared_lines - 1)}`;
   });
   return {
-    instruction: INSTRUCTION,
+    instruction: prompts.instruction,
     candidates,
     options,
     state: {
       game: opponent ? 'Tetris duel' : 'Tetris solo',
-      goal: opponent
-        ? 'Make the opponent top out; stay alive. Score does not decide the winner.'
-        : 'Survive; maximize clears and score.',
-      rules:
-        mode === 'realtime'
-          ? RULES
-          : RULES.replace(
-              'Gravity continues during requests and movement.',
-              'Gravity is frozen. Both placements resolve before attacks are applied simultaneously.',
-            ),
-      strategy: STRATEGY,
-      legend: LEGEND,
+      goal: opponent ? prompts.duelGoal : prompts.soloGoal,
+      rules: mode === 'realtime' ? prompts.realtimeRules : prompts.decisionRules,
+      strategy: prompts.strategy,
+      legend: prompts.legend,
       self: observation(game),
       ...(opponent
         ? {
             opponent: observation(opponent),
-            attack_rules:
-              mode === 'realtime'
-                ? ATTACK_RULES
-                : ATTACK_RULES.replace(
-                    'Garbage rises immediately;',
-                    'Garbage rises after both placements;',
-                  ),
+            attack_rules: mode === 'realtime' ? prompts.realtimeAttack : prompts.decisionAttack,
           }
         : {}),
     },
