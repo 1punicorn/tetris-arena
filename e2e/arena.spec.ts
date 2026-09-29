@@ -4,8 +4,10 @@ import { once } from 'node:events';
 
 let providerId: string;
 let fixture: Server;
+let fixtureCalls = 0;
 test.beforeAll(async ({ request }) => {
   fixture = createServer(async (req, res) => {
+    fixtureCalls++;
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
@@ -87,16 +89,82 @@ test('plays, exports and replays without another inference call', async ({ page,
   const state = await (await request.get('/api/state')).json();
   expect(state.snapshot.turn).toBe(4);
   expect(state.snapshot.stats[0].placements).toBe(4);
-  await page.getByRole('button', { name: 'Replay', exact: true }).first().click();
-  await expect(page).toHaveURL(/#arena$/);
+  const calls = fixtureCalls;
+  await page.locator(`.result a[href="#replay/${state.snapshot.id}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`#replay/${state.snapshot.id}$`));
+  await expect(page.getByRole('heading', { name: 'Replay', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Replay', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await expect(page.getByLabel('Replay position')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start match' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Player 1', exact: true })).toHaveCount(0);
+  await expect(page.locator('.replay-player-heading').first()).toContainText('test-alpha');
+  await expect(page.getByRole('img', { name: /Tetris board/ })).toHaveCount(2);
   await page.getByLabel('Replay position').fill('0');
-  await expect(page.locator('.status')).toHaveText('REPLAY');
+  await expect(page.locator('.status')).toHaveText('Replay paused');
+  await page.getByRole('button', { name: 'Play replay', exact: true }).click();
+  await expect
+    .poll(async () => Number(await page.getByLabel('Replay position').inputValue()))
+    .toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Pause replay', exact: true }).click();
+  const position = await page.getByLabel('Replay position').inputValue();
+  await page.getByRole('button', { name: 'Play replay', exact: true }).click();
+  await page.getByRole('link', { name: 'Arena', exact: true }).click();
+  await expect(page.getByLabel('Replay position')).toHaveCount(0);
+  await expect(page.locator('.status')).toHaveText('turn_limit');
+  await expect(page.getByRole('button', { name: 'Start match' })).toBeEnabled();
+  await page.getByRole('link', { name: 'Replay', exact: true }).click();
+  await expect(page.locator('.status')).toHaveText('Replay paused');
+  expect(Number(await page.getByLabel('Replay position').inputValue())).toBeGreaterThanOrEqual(
+    Number(position),
+  );
+  const retained = await page.getByLabel('Replay position').inputValue();
+  await page.getByRole('link', { name: 'Results', exact: true }).click();
+  await page.getByRole('link', { name: 'Replay', exact: true }).click();
+  await expect(page.getByLabel('Replay position')).toHaveValue(retained);
+  const end = (await page.getByLabel('Replay position').getAttribute('max'))!;
+  await page.getByLabel('Replay position').fill(end);
+  await expect(page.locator('.status')).toHaveText('Replay complete');
+  await page.getByRole('button', { name: 'Play replay', exact: true }).click();
+  await expect(page.locator('.status')).toHaveText('Playing replay');
+  expect(Number(await page.getByLabel('Replay position').inputValue())).toBeLessThan(Number(end));
+  await page.reload();
+  await expect(page.getByLabel('Replay position')).toHaveValue('0');
+  await expect(page.locator('.replay-player-heading').first()).toContainText('test-alpha');
+  for (const width of [640, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+  }
+  await page.getByRole('button', { name: '한국어', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '리플레이', exact: true })).toBeVisible();
+  await expect(page.getByLabel('리플레이 위치')).toBeVisible();
+  await page.screenshot({ path: '.runtime/replay-mobile-ko.png', fullPage: true });
+  await page.getByRole('button', { name: '다크 모드로 전환', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  expect(fixtureCalls).toBe(calls);
   expect((await (await request.get('/api/state')).json()).snapshot.stats).toEqual(
     state.snapshot.stats,
   );
   expect((await request.get('/api/results.csv')).headers()['content-type']).toContain('text/csv');
   expect(errors).toEqual([]);
+});
+
+test('guides an empty replay tab and handles unavailable recordings', async ({ page }) => {
+  await page.goto('/#replay');
+  await expect(page.getByRole('heading', { name: 'Choose a match to replay' })).toBeVisible();
+  await expect(page.getByRole('img', { name: /Tetris board/ })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Browse results' }).click();
+  await expect(page).toHaveURL(/#results$/);
+  await page.goto('/#replay/00000000-0000-0000-0000-000000000000');
+  await expect(page.getByRole('alert')).toHaveText('This replay could not be loaded.');
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: /Tetris board/ })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Arena', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Start match' })).toBeEnabled();
 });
 test('keeps both boards visible and layout fixed with long latency values on mobile', async ({
   page,

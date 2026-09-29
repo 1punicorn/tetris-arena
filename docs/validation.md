@@ -69,6 +69,8 @@ Protocol settings checks cover Decisions/LLM tabs with one selected model editor
 
 ## Benchmark tab
 
+Replay navigation checks cover its dedicated tab and direct match URLs, empty/unavailable recordings, playback and seeking, pause-on-navigation with position retention, and isolation from arena/benchmark controls and live model selections. Reloading reopens the recording; English/Korean mobile layouts and dark mode are checked without additional inference calls.
+
 Fixed-demo tests validate environment parsing, model-ID resolution, filtered model lists, rejection of settings writes and alternate inference routes, and enforcement of the same pair for arena and benchmark API requests. A browser fixture starts a separate server with `DEMO_MODELS`, verifies locked selectors and read-only prompt/model editors, checks saved-request previews and Korean mobile layouts, and never calls an external model.
 
 Server tests cover the batch descriptor in `/api/state`, frozen execution settings, completion and cancellation, including preserving a past batch's status when a later arena match runs. Chromium runs a real local-fixture batch from the dedicated tab, verifies fixed decision mode with independent arena/benchmark limits and no time limit, restores active settings after reload, exits a historical replay through **Watch current match**, and checks all four paired results. It also tests empty-seed validation, cancelling both the current game and remaining schedule, and English/Korean light/dark layouts at 320, 390 and 640px. No paid model calls are required.

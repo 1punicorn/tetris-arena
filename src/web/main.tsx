@@ -1,14 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  emptyGame,
-  visibleBoard,
-  landingPiece,
-  SHAPES,
-  type Game,
-  type Kind,
-  type Action,
-} from '../core/engine.js';
+import type { Action } from '../core/engine.js';
+import { PlayerGame } from './game-view.js';
+import { Replay } from './replay.js';
 import type { Snapshot } from '../core/runner.js';
 import { api } from './api.js';
 import { Settings } from './experiment-settings.js';
@@ -36,44 +30,21 @@ type State = {
   error: string | null;
   demo: DemoMode | null;
 };
-function Preview({ kind }: { kind: Kind | null }) {
-  return (
-    <span className="preview" aria-label={kind ?? 'empty'}>
-      {Array.from({ length: 16 }, (_, i) => (
-        <i
-          key={i}
-          className={kind && SHAPES[kind][Math.floor(i / 4)]?.[i % 4] ? `cell ${kind}` : 'cell'}
-        />
-      ))}
-    </span>
-  );
-}
-function Board({ game }: { game: Game }) {
-  const board = visibleBoard(game),
-    ghost = landingPiece(game);
-  return (
-    <div className="board" role="img" aria-label={`Tetris board, ${game.lines} lines cleared`}>
-      {board.flatMap((row, y) =>
-        row.map((cell, x) => {
-          const projected = !cell && ghost?.shape[y - ghost.y]?.[x - ghost.x];
-          return (
-            <i key={y * 10 + x} className={`cell ${cell ?? ''} ${projected ? 'ghost' : ''}`} />
-          );
-        }),
-      )}
-    </div>
-  );
-}
-type Page = 'arena' | 'benchmark' | 'results' | 'settings';
+type Page = 'arena' | 'benchmark' | 'results' | 'replay' | 'settings';
 function currentPage(): Page {
-  const hash = window.location.hash;
+  const hash = window.location.hash.split('/')[0];
   return hash === '#settings'
     ? 'settings'
     : hash === '#results'
       ? 'results'
       : hash === '#benchmark'
         ? 'benchmark'
-        : 'arena';
+        : hash === '#replay'
+          ? 'replay'
+          : 'arena';
+}
+function currentReplayId() {
+  return currentPage() === 'replay' ? (window.location.hash.split('/')[1] ?? '') : '';
 }
 function App() {
   const [ko, setKo] = useState(false),
@@ -97,6 +68,7 @@ function App() {
       ? t('Switch to dark mode', '다크 모드로 전환')
       : t('Switch to light mode', '라이트 모드로 전환');
   const [page, setPage] = useState<Page>(currentPage);
+  const [replayId, setReplayId] = useState(currentReplayId);
   const [connections, setConnections] = useState<Connection[]>([]),
     [players, setPlayers] = useState<[string, string]>(['', '']);
   const [connectionsLoaded, setConnectionsLoaded] = useState(false);
@@ -117,9 +89,6 @@ function App() {
   const [error, setError] = useState(''),
     [pending, setPending] = useState(false),
     [results, setResults] = useState<Snapshot[]>([]);
-  const [frames, setFrames] = useState<Snapshot[]>([]),
-    [frame, setFrame] = useState(0),
-    [replayPlaying, setReplayPlaying] = useState(false);
   const [benchDraft, setBenchDraft] = useState<BenchmarkDraft>({
     models: [],
     seeds: '1,2,3,4,5',
@@ -128,7 +97,7 @@ function App() {
   const active =
     state.progress.active ||
     (!!state.snapshot && ['playing', 'paused'].includes(state.snapshot.status));
-  const shown = frames.length ? frames[frame] : state.snapshot;
+  const shown = state.snapshot;
   const liveConfig = active ? state.snapshot?.config : undefined;
   const demo = state.demo;
   const configuredPlayers = demo?.models ?? players;
@@ -177,14 +146,17 @@ function App() {
     }
   };
   useEffect(() => {
-    const navigate = () => setPage(currentPage());
+    const navigate = () => {
+      setPage(currentPage());
+      const id = currentReplayId();
+      if (id) setReplayId(id);
+    };
     window.addEventListener('hashchange', navigate);
     return () => window.removeEventListener('hashchange', navigate);
   }, []);
   useEffect(() => {
     window.scrollTo(0, 0);
     if (page === 'results') void refresh();
-    if (page !== 'arena') setReplayPlaying(false);
   }, [page]);
   useEffect(() => {
     void api<Connection[]>('/connections')
@@ -258,27 +230,8 @@ function App() {
     if (state.snapshot?.status === 'finished') void refresh();
   }, [state.snapshot?.id, state.snapshot?.status]);
   useEffect(() => {
-    if (!replayPlaying) return;
-    const timer = setInterval(
-      () =>
-        setFrame((n) => {
-          if (n + 1 >= frames.length) {
-            setReplayPlaying(false);
-            return n;
-          }
-          return n + 1;
-        }),
-      100,
-    );
-    return () => clearInterval(timer);
-  }, [replayPlaying, frames.length]);
-  useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (
-        page !== 'arena' ||
-        (e.target as HTMLElement).closest('input,select,textarea,button') ||
-        frames.length
-      )
+      if (page !== 'arena' || (e.target as HTMLElement).closest('input,select,textarea,button'))
         return;
       const p = state.snapshot?.config.players.indexOf('human') ?? -1;
       if (p < 0) return;
@@ -300,19 +253,7 @@ function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [state.snapshot?.config.players.join(','), frames.length, page]);
-  const replay = async (id: string) => {
-    const response = await fetch(`/api/results/${id}/events.jsonl`);
-    if (!response.ok) throw new Error('replay_unavailable');
-    const events = (await response.text())
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    setFrames(events.filter((e) => e.type === 'state').map((e) => e.snapshot));
-    setFrame(0);
-    setReplayPlaying(false);
-    window.location.hash = 'arena';
-  };
+  }, [state.snapshot?.config.players.join(','), page]);
   const summary =
     shown?.status === 'finished'
       ? shown.reason === 'top_out'
@@ -341,6 +282,12 @@ function App() {
           </a>
           <a href="#results" aria-current={page === 'results' ? 'page' : undefined}>
             {t('Results', '결과')}
+          </a>
+          <a
+            href={replayId ? `#replay/${replayId}` : '#replay'}
+            aria-current={page === 'replay' ? 'page' : undefined}
+          >
+            {t('Replay', '리플레이')}
           </a>
           <a href="#settings" aria-current={page === 'settings' ? 'page' : undefined}>
             {t('Settings', '설정')}
@@ -396,10 +343,12 @@ function App() {
             {page === 'settings'
               ? t('Settings', '설정')
               : page === 'results'
-                ? t('Results & replay', '결과 및 다시 보기')
-                : page === 'benchmark'
-                  ? t('Benchmark', '벤치마크')
-                  : t('Arena', '대전')}
+                ? t('Results', '결과')
+                : page === 'replay'
+                  ? t('Replay', '리플레이')
+                  : page === 'benchmark'
+                    ? t('Benchmark', '벤치마크')
+                    : t('Arena', '대전')}
           </h1>
           <p>
             {page === 'settings'
@@ -409,18 +358,23 @@ function App() {
                 )
               : page === 'results'
                 ? t(
-                    'Review completed matches, replay decisions and export results.',
-                    '완료된 경기를 다시 보고 결과를 내보내세요.',
+                    'Review completed matches and export results.',
+                    '완료된 경기 기록을 확인하고 결과를 내보내세요.',
                   )
-                : page === 'benchmark'
+                : page === 'replay'
                   ? t(
-                      'Compare models through repeated turn-based matches.',
-                      '턴제 반복 대전으로 모델의 판단과 전략을 비교하세요.',
+                      'Watch a recorded match. Playback makes no model requests.',
+                      '저장된 경기를 다시 봅니다. 재생 중에는 모델을 호출하지 않습니다.',
                     )
-                  : t(
-                      'Run matches and compare model decisions.',
-                      '모델을 대전시키고 판단 결과를 비교하세요.',
-                    )}
+                  : page === 'benchmark'
+                    ? t(
+                        'Compare models through repeated turn-based matches.',
+                        '턴제 반복 대전으로 모델의 판단과 전략을 비교하세요.',
+                      )
+                    : t(
+                        'Run matches and compare model decisions.',
+                        '모델을 대전시키고 판단 결과를 비교하세요.',
+                      )}
           </p>
         </div>
         {page === 'arena' && (
@@ -455,8 +409,6 @@ function App() {
           connected={connectionStatus === 'connected'}
           onStart={() =>
             void perform(async () => {
-              setFrames([]);
-              setReplayPlaying(false);
               await api('/bench', {
                 models: demo?.models ?? benchDraft.models,
                 seeds: benchDraft.seeds
@@ -472,8 +424,6 @@ function App() {
           }
           onStop={() => void perform(async () => setState(await api<State>('/cancel', {})))}
           onWatch={() => {
-            setFrames([]);
-            setReplayPlaying(false);
             window.location.hash = 'arena';
           }}
         />
@@ -505,9 +455,9 @@ function App() {
                     </small>
                   </div>
                   <span>{s.winner === null ? '—' : `P${s.winner + 1} ${t('wins', '승리')}`}</span>
-                  <button className="small" onClick={() => void perform(() => replay(s.id))}>
-                    {t('Replay', '다시 보기')}
-                  </button>
+                  <a className="replay-link" href={`#replay/${s.id}`}>
+                    {t('Replay', '리플레이')} →
+                  </a>
                   <a href={`/api/results/${s.id}/summary.json`} target="_blank" rel="noreferrer">
                     JSON ↗
                   </a>
@@ -519,7 +469,7 @@ function App() {
             </div>
           )}
         </section>
-      ) : (
+      ) : page === 'replay' ? null : (
         <>
           <section className="setup" aria-label="Match settings">
             <div className="settings">
@@ -577,7 +527,6 @@ function App() {
                 disabled={active || pending || connectionStatus !== 'connected' || !canStart}
                 onClick={() =>
                   void perform(async () => {
-                    setFrames([]);
                     await api('/runs', runConfig);
                   })
                 }
@@ -620,7 +569,7 @@ function App() {
             )}
           </section>
           <div className="match-strip">
-            <span className="status">{frames.length ? t('REPLAY', '다시 보기') : summary}</span>
+            <span className="status">{summary}</span>
             <span>
               {t('Turn', '턴')} {shown?.turn ?? 0} <b>·</b>{' '}
               {((shown?.elapsedMs ?? 0) / 1000).toFixed(1)}s
@@ -635,36 +584,9 @@ function App() {
               </span>
             )}
           </div>
-          {frames.length > 0 && (
-            <div className="replay">
-              <button onClick={() => setReplayPlaying(!replayPlaying)}>
-                {replayPlaying ? 'Ⅱ' : '▶'}
-              </button>
-              <input
-                aria-label="Replay position"
-                type="range"
-                min="0"
-                max={frames.length - 1}
-                value={frame}
-                onChange={(e) => setFrame(Number(e.target.value))}
-              />
-              <span>
-                {frame + 1}/{frames.length}
-              </span>
-              <button
-                onClick={() => {
-                  setFrames([]);
-                  setReplayPlaying(false);
-                }}
-              >
-                {t('Return to live', '실시간 화면')}
-              </button>
-            </div>
-          )}
           <section className="arena">
             {[0, 1].map((p) => {
               const selected = connections.find((c) => c.id === arenaPlayers[p]),
-                game = shown?.games[p] ?? emptyGame(),
                 stats = shown?.stats[p];
               return (
                 <article className={`player player-${p}`} key={p}>
@@ -729,88 +651,7 @@ function App() {
                       {selected?.reasoning ?? 'off'}
                     </span>
                   </div>
-                  <div className="play-area">
-                    <Board game={game} />
-                    <aside>
-                      <div className="piece-box">
-                        <span>HOLD</span>
-                        <Preview kind={game.hold} />
-                      </div>
-                      <div className="piece-box">
-                        <span>NEXT</span>
-                        <Preview kind={game.queue[0] ?? null} />
-                      </div>
-                      <dl className="score">
-                        <div>
-                          <dt>{t('Lines', '제거 줄')}</dt>
-                          <dd>{game.lines}</dd>
-                        </div>
-                        <div>
-                          <dt>{t('Attack', '공격')}</dt>
-                          <dd>{stats?.sent ?? 0}</dd>
-                        </div>
-                        <div>
-                          <dt>Tetris</dt>
-                          <dd>{stats?.tetrises ?? 0}</dd>
-                        </div>
-                        <div>
-                          <dt>{t('Score', '점수')}</dt>
-                          <dd>{game.score}</dd>
-                        </div>
-                      </dl>
-                    </aside>
-                  </div>
-                  <div className="metrics">
-                    <div>
-                      <span>{t('Last response', '최근 응답')}</span>
-                      <b>
-                        {stats?.lastMs === null || stats?.lastMs === undefined
-                          ? '—'
-                          : `${stats.lastMs.toLocaleString()} ms`}
-                      </b>
-                    </div>
-                    <div>
-                      <span>p50 / p95</span>
-                      <b>
-                        {stats?.p50Ms ?? '—'} / {stats?.p95Ms ?? '—'} ms
-                      </b>
-                    </div>
-                    <div>
-                      <span>{t('Valid / calls', '정상 / 호출')}</span>
-                      <b>
-                        {stats?.valid ?? 0} / {stats?.calls ?? 0}
-                      </b>
-                    </div>
-                    <div>
-                      <span>{t('Errors / stale', '오류 / 만료')}</span>
-                      <b>
-                        {stats?.failures ?? 0} / {stats?.stale ?? 0}
-                      </b>
-                    </div>
-                  </div>
-                  <details className="details">
-                    <summary>{t('More metrics', '상세 지표')}</summary>
-                    <p>
-                      {t('Candidate / provider', '후보 계산 / API')}:{' '}
-                      {Math.round(stats?.candidateMs ?? 0)} / {stats?.providerMs ?? 0} ms
-                      <br />
-                      {t('Placements / forced', '배치 / 강제 선택')}: {stats?.placements ?? 0} /{' '}
-                      {stats?.forced ?? 0}
-                      <br />
-                      {t('Input / output tokens', '입력 / 출력 토큰')}: {stats?.inputTokens ?? '—'}{' '}
-                      / {stats?.outputTokens ?? '—'}
-                      <br />
-                      {t('Reported cost', '보고된 비용')}:{' '}
-                      {stats?.cost === null || stats?.cost === undefined
-                        ? '—'
-                        : `$${stats.cost.toFixed(6)}`}
-                    </p>
-                    {Object.entries(stats?.errors ?? {}).map(([code, count]) => (
-                      <p key={code}>
-                        {code}: {count}
-                      </p>
-                    ))}
-                  </details>
+                  <PlayerGame snapshot={shown} player={p} t={t} />
                   {arenaPlayers[p] === 'human' && (
                     <div className="human-controls">
                       {(
@@ -852,6 +693,7 @@ function App() {
           </section>
         </>
       )}
+      <Replay active={page === 'replay'} runId={replayId} t={t} />
       <footer>
         {t(
           'Assisted spatial decision benchmark. Results describe this task, not general intelligence.',

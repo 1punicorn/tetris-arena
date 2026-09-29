@@ -246,6 +246,7 @@ p {
   color: var(--muted);
   border-bottom: 2px solid transparent;
   padding-top: 2px;
+  white-space: nowrap;
 }
 .main-nav a[aria-current='page'] {
   color: var(--ink);
@@ -781,6 +782,43 @@ aside {
   font-family: var(--mono);
   font-size: 11px;
 }
+.replay-empty {
+  display: grid;
+  gap: 16px;
+  padding: 28px 0;
+  border-top: 1px solid var(--line);
+}
+.replay-overview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 22px 0;
+  border-block: 1px solid var(--line);
+}
+.replay-overview > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.replay-overview .hint {
+  margin-top: 8px;
+}
+.replay-player-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+}
+.replay-player-heading .player-number {
+  padding-top: 0;
+}
+.replay-player-heading h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
+}
 footer {
   display: flex;
   justify-content: space-between;
@@ -1103,7 +1141,7 @@ button.danger {
     grid-column: 1 / -1;
     grid-row: 2;
     height: 40px;
-    gap: 20px;
+    gap: clamp(10px, 3vw, 20px);
     font-size: 12px;
     align-self: stretch;
   }
@@ -1264,13 +1302,13 @@ button.danger {
   .result strong {
     font-size: 12px;
   }
-  .result > a {
+  .result > a:not(.replay-link) {
     display: none;
   }
   .result small {
     font-size: 9px;
   }
-  .result .small {
+  .result .replay-link {
     font-size: 11px;
     padding-inline: 8px;
   }
@@ -1295,6 +1333,14 @@ button.danger {
   .replay button {
     font-size: 11px;
     padding-inline: 8px;
+  }
+  .replay-player-heading {
+    align-items: flex-start;
+    gap: 6px;
+    min-height: 64px;
+  }
+  .replay-player-heading h3 {
+    font-size: 11px;
   }
   .model-settings {
     padding-top: 22px;

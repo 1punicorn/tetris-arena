@@ -118,8 +118,13 @@ test('runs a batch in its own tab, restores progress after reload and opens the 
   await expect(page.getByLabel('Benchmark run limit', { exact: true })).toHaveValue('1');
   await expect(page.getByRole('button', { name: 'Run benchmark', exact: true })).toBeDisabled();
   await page.getByRole('link', { name: 'Results', exact: true }).click();
-  await page.getByRole('button', { name: 'Replay', exact: true }).first().click();
-  await expect(page.locator('.status')).toHaveText('REPLAY');
+  await page.locator('.result .replay-link').first().click();
+  await expect(page).toHaveURL(/#replay\//);
+  await expect(page.locator('.status')).toHaveText('Replay paused');
+  await expect(page.locator('.replay-player-heading')).not.toContainText([
+    'bench-alpha',
+    'bench-beta',
+  ]);
   await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
   await page.getByRole('button', { name: 'Watch current match', exact: true }).click();
   await expect(page).toHaveURL(/#arena$/);
@@ -129,6 +134,9 @@ test('runs a batch in its own tab, restores progress after reload and opens the 
   await expect(page.getByRole('button', { name: 'Player 1', exact: true })).toContainText(
     'Bench Alpha',
   );
+  await page.getByRole('link', { name: 'Replay', exact: true }).click();
+  await expect(page.getByLabel('Replay position')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop benchmark', exact: true })).toHaveCount(0);
   await page.getByRole('link', { name: 'Benchmark', exact: true }).click();
   release();
   await expect(page.locator('.benchmark-status')).toHaveText('Completed');

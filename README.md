@@ -159,6 +159,8 @@ Every run writes a UUID directory under `results/`:
 
 CLI also writes `results.csv`. The UI exports a CSV of all finished runs in its configured result directory. Replay reads stored snapshots and makes no model requests. Replay is visual playback, not a second inference run.
 
+**Results** lists completed matches and exports. Each replay opens in its own **Replay** tab with playback controls, a seek bar and recorded model details. Its URL can be reopened directly. Switching tabs pauses playback and preserves the position; **Arena** continues to show the current server match independently.
+
 Actual response model IDs are recorded when returned. Latency is reported separately for candidate preparation and the provider, with end-to-end last/p50/p95 for valid choices. Cost is **null** when unknown; LLM token counts are not converted using invented prices. Only provider-reported cost is accumulated. Provider keys, raw provider errors and reasoning text are not written to results. Artifact version 2 records editable prompts and optional request parameters so experiments can be reviewed. Known credential/header fields are recursively redacted; private endpoint URLs remain hashed. Prompt text and other parameter values are part of the downloadable experiment record, so do not put credentials in those fields. Old results retain their original metadata format.
 
 ## Architecture
