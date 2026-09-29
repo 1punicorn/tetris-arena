@@ -13,12 +13,14 @@ import { csv } from './artifacts.js';
 import { Manager } from './manager.js';
 import { SettingsStore } from './settings-store.js';
 import { settingsApi } from './settings-api.js';
+import { isDemoPair, type DemoMode } from './demo.js';
 
 export function createApp(
   manager: Manager,
   store: SettingsStore,
   port: number,
   access: AccessPolicy = createAccessPolicy(port),
+  demo: DemoMode | null = null,
 ) {
   const app = new Hono();
   const authenticate = access.needsAuthentication
@@ -72,6 +74,7 @@ export function createApp(
     progress: manager.progress,
     benchmark: manager.benchmark,
     error: manager.error,
+    demo,
   });
   const requireIdle = () => {
     if (manager.progress.active || (manager.runner && manager.runner.status !== 'finished'))
@@ -82,9 +85,17 @@ export function createApp(
       throw new Error('unknown_model_override');
   };
   app.get('/api/health', (c) => c.json({ ok: true, version: '0.1.0' }));
-  app.route('/api/settings', settingsApi(store));
-  app.get('/api/connections', (c) => c.json([...baselines, ...store.publicModels()]));
+  app.route('/api/settings', settingsApi(store, demo));
+  app.get('/api/connections', (c) => {
+    const models = store.publicModels();
+    return c.json(
+      demo
+        ? demo.models.map((id) => models.find((model) => model.id === id)!)
+        : [...baselines, ...models],
+    );
+  });
   app.get('/api/connections/:id/models', async (c) => {
+    if (demo) return c.json({ error: 'demo_models_locked' }, 403);
     const profile = store.get(c.req.param('id'));
     return c.json(
       await discover(profile, AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(10000)])),
@@ -122,8 +133,11 @@ export function createApp(
     const config = RunConfigSchema.parse({
       timeoutMs: experiment.timeoutMs,
       attempts: experiment.attempts,
+      ...(demo ? { players: demo.models } : {}),
       ...raw,
     });
+    if (demo && (!isDemoPair(demo, config.players) || Object.keys(config.modelOverrides).length))
+      return c.json({ error: 'demo_models_locked' }, 403);
     verifyOverrides(config.modelOverrides);
     return c.json(manager.start(config, store.profiles(), experiment), 201);
   });
@@ -133,14 +147,23 @@ export function createApp(
     const raw = z.record(z.string(), z.unknown()).parse(await c.req.json());
     const run = raw.run === undefined ? {} : z.record(z.string(), z.unknown()).parse(raw.run);
     const config = BenchConfigSchema.parse({
+      ...(demo ? { models: demo.models } : {}),
       ...raw,
       run: {
         mode: 'decision',
         timeoutMs: experiment.timeoutMs,
         attempts: experiment.attempts,
+        ...(demo ? { players: demo.models } : {}),
         ...run,
       },
     });
+    if (
+      demo &&
+      (!isDemoPair(demo, config.models) ||
+        !isDemoPair(demo, config.run.players) ||
+        Object.keys(config.run.modelOverrides).length)
+    )
+      return c.json({ error: 'demo_models_locked' }, 403);
     verifyOverrides(config.run.modelOverrides);
     return c.json(manager.bench(config, store.profiles(), experiment), 201);
   });

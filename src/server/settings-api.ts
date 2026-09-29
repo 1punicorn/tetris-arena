@@ -10,12 +10,22 @@ import { random } from '../core/random.js';
 import { buildCandidates } from '../core/ai-candidates.js';
 import { makeProblem } from '../core/observation.js';
 import { ExperimentSchema } from '../core/experiment.js';
+import type { DemoMode } from './demo.js';
 
 const draftSchema = z
   .object({ connectionId: z.string().optional(), profile: ConnectionInputSchema })
   .strict();
-export function settingsApi(store: SettingsStore) {
+export function settingsApi(store: SettingsStore, demo: DemoMode | null = null) {
   const app = new Hono();
+  app.use('*', async (c, next) => {
+    if (
+      demo &&
+      c.req.method !== 'GET' &&
+      !(c.req.method === 'POST' && c.req.path === '/api/settings/preview')
+    )
+      return c.json({ error: 'demo_settings_read_only' }, 403);
+    await next();
+  });
   app.get('/experiment', (c) => c.json(store.experiment()));
   app.put('/experiment', async (c) => c.json(store.saveExperiment(await c.req.json())));
   app.post('/preview', async (c) => {
@@ -29,6 +39,8 @@ export function settingsApi(store: SettingsStore) {
       })
       .strict()
       .parse(await c.req.json());
+    if (demo && (!demo.models.includes(input.modelId) || input.model || input.experiment))
+      return c.json({ error: 'demo_settings_read_only' }, 403);
     const saved = store.model(input.modelId);
     const model = input.model
       ? StoredModelSchema.parse({ ...input.model, id: saved.id, providerId: saved.providerId })
@@ -46,7 +58,23 @@ export function settingsApi(store: SettingsStore) {
     );
     return c.json({ ...(await previewRequest(profile, problem)), mode: input.mode, sample: true });
   });
-  app.get('/providers', (c) => c.json(store.providers()));
+  app.get('/providers', (c) => {
+    const models = demo ? store.models().filter((model) => demo.models.includes(model.id)) : null;
+    return c.json(
+      models
+        ? store
+            .providers()
+            .filter((provider) => models.some((model) => model.providerId === provider.id))
+            .map((provider) => ({
+              ...provider,
+              modelCount: models.filter((model) => model.providerId === provider.id).length,
+              enabledCount: models.filter(
+                (model) => model.providerId === provider.id && model.enabled,
+              ).length,
+            }))
+        : store.providers(),
+    );
+  });
   app.post('/providers', async (c) => c.json(store.saveProvider(await c.req.json()), 201));
   app.put('/providers/:id', async (c) =>
     c.json(store.saveProvider(await c.req.json(), c.req.param('id'))),
@@ -57,7 +85,8 @@ export function settingsApi(store: SettingsStore) {
   });
   app.get('/providers/:id/models', (c) => {
     store.provider(c.req.param('id'));
-    return c.json(store.models(c.req.param('id')));
+    const models = store.models(c.req.param('id'));
+    return c.json(demo ? models.filter((model) => demo.models.includes(model.id)) : models);
   });
   app.put('/providers/:id/models', async (c) =>
     c.json(store.selectModels(c.req.param('id'), await c.req.json())),
@@ -103,7 +132,9 @@ export function settingsApi(store: SettingsStore) {
     );
     return c.json({ ok: true, model: result.model, latencyMs: Math.round(result.latencyMs) });
   });
-  app.get('/connections', (c) => c.json(store.list()));
+  app.get('/connections', (c) =>
+    c.json(store.list().filter((model) => !demo || demo.models.includes(model.id))),
+  );
   app.post('/connections', async (c) => c.json(store.save(await c.req.json()), 201));
   app.put('/connections/:id', async (c) =>
     c.json(store.save(await c.req.json(), c.req.param('id'))),

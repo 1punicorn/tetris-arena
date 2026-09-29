@@ -839,10 +839,12 @@ export function ModelOptions({
   model,
   t,
   onSaved,
+  readOnly = false,
 }: {
   model: StoredModel;
   t: Translate;
   onSaved: (model: StoredModel | null, removedId?: string) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const { id, providerId: _providerId, ...initial } = model;
   const [form, setForm] = useState<ModelInput>(initial);
@@ -880,6 +882,7 @@ export function ModelOptions({
       className="model-options"
       onSubmit={(e) => {
         e.preventDefault();
+        if (readOnly) return;
         void perform(async () => {
           await onSaved(
             await api<StoredModel>(`/settings/registered-models/${id}`, draft(), 'PUT'),
@@ -888,7 +891,7 @@ export function ModelOptions({
         });
       }}
     >
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || readOnly}>
         <p className="hint">
           {form.api === 'decisions'
             ? t(
@@ -1158,7 +1161,7 @@ export function ModelOptions({
       <RequestPreview
         t={t}
         modelId={id}
-        input={() => ({ model: draft() })}
+        input={() => (readOnly ? {} : { model: draft() })}
         revision={JSON.stringify([form, options, requestBody])}
       />
       <p className="hint">

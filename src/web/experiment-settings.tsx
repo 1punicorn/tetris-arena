@@ -12,7 +12,15 @@ import { RequestPreview } from './request-preview.js';
 import { ProtocolSettings } from './protocol-settings.js';
 
 type Translate = (en: string, ko: string) => string;
-export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Promise<void> }) {
+export function Settings({
+  t,
+  onChanged,
+  demoModels,
+}: {
+  t: Translate;
+  onChanged: () => Promise<void>;
+  demoModels?: { id: string; name: string; model: string; providerName?: string }[];
+}) {
   const [tab, setTab] = useState('models');
   const [visited, setVisited] = useState(new Set(['models']));
   const [protocol, setProtocol] = useState<'decisions' | 'llm'>('decisions');
@@ -31,6 +39,14 @@ export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Prom
   };
   return (
     <>
+      {demoModels && (
+        <p className="hint demo-settings-notice">
+          {t(
+            'Demo mode · All settings are read-only. Matches use the two fixed models.',
+            '데모 모드 · 모든 설정은 읽기 전용입니다. 대전에는 지정된 두 모델만 사용합니다.',
+          )}
+        </p>
+      )}
       <div
         className="provider-tabs settings-tabs"
         role="tablist"
@@ -71,14 +87,30 @@ export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Prom
         aria-labelledby="settings-tab-models"
         hidden={tab !== 'models'}
       >
-        <ModelSettings
-          t={t}
-          revision={providerRevision}
-          onChanged={async () => {
-            setProtocolRevision((v) => v + 1);
-            await onChanged();
-          }}
-        />
+        {demoModels ? (
+          <section>
+            <h2>{t('Demo models', '데모 모델')}</h2>
+            <dl className="demo-models">
+              {demoModels.map((model) => (
+                <div key={model.id}>
+                  <dt>{model.name}</dt>
+                  <dd>
+                    {model.providerName} · {model.model}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : (
+          <ModelSettings
+            t={t}
+            revision={providerRevision}
+            onChanged={async () => {
+              setProtocolRevision((v) => v + 1);
+              await onChanged();
+            }}
+          />
+        )}
       </div>
       <div
         role="tabpanel"
@@ -86,7 +118,7 @@ export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Prom
         aria-labelledby="settings-tab-prompts"
         hidden={tab !== 'prompts'}
       >
-        {visited.has('prompts') && <ExperimentSettings t={t} />}
+        {visited.has('prompts') && <ExperimentSettings t={t} readOnly={!!demoModels} />}
       </div>
       <div
         role="tabpanel"
@@ -99,6 +131,7 @@ export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Prom
             t={t}
             type={protocol}
             revision={protocolRevision}
+            readOnly={!!demoModels}
             onOpenProviders={() => show('models')}
             onChanged={async () => {
               setProviderRevision((v) => v + 1);
@@ -111,7 +144,7 @@ export function Settings({ t, onChanged }: { t: Translate; onChanged: () => Prom
   );
 }
 
-function ExperimentSettings({ t }: { t: Translate }) {
+function ExperimentSettings({ t, readOnly = false }: { t: Translate; readOnly?: boolean }) {
   const [form, setForm] = useState<Experiment | null>(null);
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
@@ -157,14 +190,20 @@ function ExperimentSettings({ t }: { t: Translate }) {
     <section className="content-section experiment-settings">
       <h2>{t('Prompts & requests', '프롬프트 및 요청')}</h2>
       <p className="hint">
-        {t(
-          'Shared by all models. Model-specific instructions are appended in model options. Saving applies to the next match or benchmark; a running batch keeps its original settings.',
-          '모든 모델이 사용하는 공통 설정입니다. 모델 옵션에서 추가 지침을 붙일 수 있습니다. 저장한 설정은 다음 경기·벤치마크부터 적용되며 진행 중인 배치는 기존 설정을 유지합니다.',
-        )}
+        {readOnly
+          ? t(
+              'These common instructions are used by both demo models. Settings are read-only.',
+              '두 데모 모델이 사용하는 공통 지침입니다. 설정은 읽기 전용입니다.',
+            )
+          : t(
+              'Shared by all models. Model-specific instructions are appended in model options. Saving applies to the next match or benchmark; a running batch keeps its original settings.',
+              '모든 모델이 사용하는 공통 설정입니다. 모델 옵션에서 추가 지침을 붙일 수 있습니다. 저장한 설정은 다음 경기·벤치마크부터 적용되며 진행 중인 배치는 기존 설정을 유지합니다.',
+            )}
       </p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
+          if (readOnly) return;
           setBusy(true);
           setError('');
           setNotice('');
@@ -189,7 +228,7 @@ function ExperimentSettings({ t }: { t: Translate }) {
           }
         }}
       >
-        <fieldset disabled={busy}>
+        <fieldset disabled={busy || readOnly}>
           <div className="form-actions">
             <button
               type="button"
@@ -301,7 +340,11 @@ function ExperimentSettings({ t }: { t: Translate }) {
           {notice}
         </p>
       )}
-      <RequestPreview t={t} input={() => ({ experiment: form })} revision={JSON.stringify(form)} />
+      <RequestPreview
+        t={t}
+        input={() => (readOnly ? {} : { experiment: form })}
+        revision={JSON.stringify(form)}
+      />
     </section>
   );
 }

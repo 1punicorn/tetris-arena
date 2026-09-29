@@ -23,6 +23,8 @@ Configure DNS and your HTTPS proxy to forward the domain to `HOST:PORT`, preserv
 
 `SETTINGS_DB` optionally overrides `data/settings.sqlite`. The service user needs write access to the database directory. Keep it outside the web asset directory and out of version control. Shared provider keys/endpoints, enabled models and model options are managed at `/#settings`, without editing `.env` or restarting the service.
 
+To pin a public demo to two models, register them first and set `DEMO_MODELS=jev,deepseek/deepseek-v4.1-flash` in the server's `.env` or private `service.env`, then restart. Values are saved connection IDs or unique API model IDs. Startup rejects missing, disabled, unavailable, ambiguous or duplicate models. Demo mode makes all settings read-only and restricts both arena and benchmark requests to that pair, including API requests. Request previews remain available; alternate model tests and catalog discovery are blocked. Removing the variable and restarting restores normal settings without deleting data.
+
 Settings opens directly without administrator registration or a setup code. If the entire site uses HTTP Basic authentication, that login also protects Settings. With `PUBLIC_ACCESS=true`, visitors can access the arena and manage model connections. Saved API keys are never returned to the browser.
 
 An active match or batch retains its original profiles while Settings changes apply to future runs. The server and default CLI share the same SQLite file. Existing JSON profiles and resolved environment keys are imported once on initialization. Original files are retained for migration review; they are no longer the main settings store.

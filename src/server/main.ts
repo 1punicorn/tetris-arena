@@ -9,6 +9,7 @@ import { Artifacts } from './artifacts.js';
 import { createApp } from './app.js';
 import { createAccessPolicy, REQUEST_VARY } from './access.js';
 import { SettingsStore } from './settings-store.js';
+import { createDemoMode } from './demo.js';
 
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -28,7 +29,8 @@ const manager = new Manager(new Artifacts(process.env.RESULTS_DIR ?? 'results'))
 const config = process.env.CONNECTIONS_FILE ?? 'connections.local.json';
 const store = new SettingsStore(process.env.SETTINGS_DB ?? 'data/settings.sqlite');
 await store.importLegacy(config);
-const app = createApp(manager, store, port, access);
+const demo = createDemoMode(process.env.DEMO_MODELS, store.profiles());
+const app = createApp(manager, store, port, access, demo);
 const vite = dev
   ? await (
       await import('vite')

@@ -12,6 +12,7 @@ export default defineConfig({
       RESULTS_DIR: `.runtime/e2e-${process.pid}/results`,
       CONNECTIONS_FILE: '.runtime/no-connections.json',
       SETTINGS_DB: `.runtime/e2e-${process.pid}/settings.sqlite`,
+      DEMO_MODELS: '',
     },
     reuseExistingServer: false,
     timeout: 30000,

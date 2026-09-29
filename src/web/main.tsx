@@ -15,6 +15,7 @@ import { Settings } from './experiment-settings.js';
 import { ModelPicker } from './model-picker.js';
 import { Benchmark, type BenchmarkDraft } from './benchmark.js';
 import type { BenchmarkState } from '../core/run-config.js';
+import type { DemoMode } from '../server/demo.js';
 import './style.css';
 
 type Connection = {
@@ -33,6 +34,7 @@ type State = {
   progress: { total: number; completed: number; active: boolean };
   benchmark: BenchmarkState | null;
   error: string | null;
+  demo: DemoMode | null;
 };
 function Preview({ kind }: { kind: Kind | null }) {
   return (
@@ -107,6 +109,7 @@ function App() {
       progress: { total: 0, completed: 0, active: false },
       benchmark: null,
       error: null,
+      demo: null,
     }),
     [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>(
       'connecting',
@@ -127,10 +130,12 @@ function App() {
     (!!state.snapshot && ['playing', 'paused'].includes(state.snapshot.status));
   const shown = frames.length ? frames[frame] : state.snapshot;
   const liveConfig = active ? state.snapshot?.config : undefined;
-  const arenaPlayers = liveConfig?.players ?? players;
+  const demo = state.demo;
+  const configuredPlayers = demo?.models ?? players;
+  const arenaPlayers = liveConfig?.players ?? configuredPlayers;
   const arenaMode = liveConfig?.mode ?? mode;
   const registeredModels = connections.filter((c) => c.provider !== 'baseline');
-  const canStart = players.every(
+  const canStart = configuredPlayers.every(
     (id, index) =>
       (index === 1 && id === 'none') ||
       (mode === 'realtime' && id === 'human') ||
@@ -138,7 +143,7 @@ function App() {
   );
   const runConfig = {
     mode,
-    players,
+    players: configuredPlayers,
     seed,
     maxSeconds: limit,
     maxTurns: turns,
@@ -372,7 +377,7 @@ function App() {
           </button>
           <a
             className="github-link"
-            href="https://github.com/hurxxxx/tetris"
+            href="https://github.com/1punicorn/tetris-arena"
             target="_blank"
             rel="noreferrer"
           >
@@ -430,12 +435,17 @@ function App() {
         </div>
       )}
       {page === 'settings' ? (
-        <Settings t={t} onChanged={refreshConnections} />
+        <Settings
+          t={t}
+          onChanged={refreshConnections}
+          demoModels={demo ? registeredModels : undefined}
+        />
       ) : page === 'benchmark' ? (
         <Benchmark
           t={t}
           models={registeredModels}
-          draft={benchDraft}
+          draft={demo ? { ...benchDraft, models: demo.models } : benchDraft}
+          demoMode={!!demo}
           onChange={setBenchDraft}
           benchmark={state.benchmark}
           progress={state.progress}
@@ -448,7 +458,7 @@ function App() {
               setFrames([]);
               setReplayPlaying(false);
               await api('/bench', {
-                models: benchDraft.models,
+                models: demo?.models ?? benchDraft.models,
                 seeds: benchDraft.seeds
                   .split(',')
                   .map((s) => s.trim())
@@ -666,13 +676,21 @@ function App() {
                         label={`Player ${p + 1}`}
                         t={t}
                         value={[arenaPlayers[p]]}
-                        disabled={active}
+                        disabled={active || !!demo}
+                        description={
+                          demo
+                            ? t(
+                                'Models cannot be changed in demo mode.',
+                                '데모 모드에서는 모델을 변경할 수 없습니다.',
+                              )
+                            : undefined
+                        }
                         options={[
                           ...connections.filter(
                             (c) =>
                               c.provider !== 'baseline' || (active && c.id === arenaPlayers[p]),
                           ),
-                          ...(arenaMode === 'realtime'
+                          ...(!demo && arenaMode === 'realtime'
                             ? [
                                 {
                                   id: 'human',
@@ -683,7 +701,7 @@ function App() {
                                 },
                               ]
                             : []),
-                          ...(p === 1
+                          ...(!demo && p === 1
                             ? [
                                 {
                                   id: 'none',
@@ -814,12 +832,19 @@ function App() {
             })}
           </section>
           <section className="content-section connections">
-            <h2>{t('Add your models', '내 모델 연결하기')}</h2>
+            <h2>
+              {demo ? t('Demo settings', '데모 설정') : t('Add your models', '내 모델 연결하기')}
+            </h2>
             <p>
-              {t(
-                'Manage providers, API keys and saved model IDs from Settings.',
-                '설정 화면에서 공급자, API 키, 모델 ID를 추가하고 저장하세요.',
-              )}
+              {demo
+                ? t(
+                    'Models are fixed in this demo. View the saved prompts and model options in Settings.',
+                    '데모에서는 모델이 고정되어 있습니다. 설정 화면에서 저장된 프롬프트와 모델 옵션을 확인하세요.',
+                  )
+                : t(
+                    'Manage providers, API keys and saved model IDs from Settings.',
+                    '설정 화면에서 공급자, API 키, 모델 ID를 추가하고 저장하세요.',
+                  )}
             </p>
             <a className="page-link" href="#settings">
               {t('Open settings', '설정 열기')} →

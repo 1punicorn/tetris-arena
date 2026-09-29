@@ -14,6 +14,7 @@ type Props = {
   value: string[];
   onChange: (ids: string[]) => void;
   label: string;
+  description?: string;
   disabled?: boolean;
   multiple?: boolean;
   t: (en: string, ko: string) => string;
@@ -24,6 +25,7 @@ export function ModelPicker({
   value,
   onChange,
   label,
+  description,
   disabled,
   multiple = false,
   t,
@@ -121,6 +123,7 @@ export function ModelPicker({
         type="button"
         className="model-select-trigger"
         aria-label={label}
+        aria-describedby={description ? `${id}-hint` : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? `${id}-list` : undefined}
@@ -139,6 +142,11 @@ export function ModelPicker({
         </span>
         <span aria-hidden="true">⌄</span>
       </button>
+      {description && (
+        <p className="model-select-hint" id={`${id}-hint`}>
+          {description}
+        </p>
+      )}
       {open &&
         createPortal(
           <div

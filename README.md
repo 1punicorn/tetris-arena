@@ -1,6 +1,6 @@
 # Tetris AI Bench
 
-[![CI](https://github.com/hurxxxx/tetris/actions/workflows/ci.yml/badge.svg)](https://github.com/hurxxxx/tetris/actions/workflows/ci.yml)
+[![CI](https://github.com/1punicorn/tetris-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/1punicorn/tetris-arena/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A local Tetris arena for comparing **decision models and LLMs** on the same assisted placement task. Watch AI vs AI, play against a model, or run paired, seeded evaluations from the Benchmark tab or command line.
@@ -19,8 +19,8 @@ English and Korean UI. Both boards stay visible on mobile. Model settings are st
 Requires **Node.js 24** and **pnpm 10.34.5**.
 
 ```sh
-git clone https://github.com/hurxxxx/tetris.git
-cd tetris
+git clone https://github.com/1punicorn/tetris-arena.git
+cd tetris-arena
 npm install -g pnpm@10.34.5
 pnpm install --frozen-lockfile
 pnpm dev
@@ -66,6 +66,16 @@ Request timeout and evaluation attempts are also editable. Changes are stored in
 Preview uses the current editor values, a sample board, and saved settings from the other settings tab; it does not save drafts. Results link to **Prompts & settings**, a frozen experiment record with prompt text, per-model instructions and redacted request parameters. This makes strategy comparisons inspectable; no improvement in playing strength is implied by a preset.
 
 No source edit, environment variable or restart is required. Deselecting a model keeps its saved ID and options for later re-enabling. Deleting a provider removes its saved models, while historical results remain. Changes apply to future matches; an in-progress match or paired batch keeps its initial configuration.
+
+### Fixed-model demo
+
+For a public demo, register the two models first, then set an optional server environment variable in `.env` or the service environment file:
+
+```sh
+DEMO_MODELS=jev,deepseek/deepseek-v4.1-flash
+```
+
+Each entry can be a saved connection ID from `/api/connections` or an API model ID that uniquely identifies an enabled, available registration. Exactly two distinct models are required; an invalid configuration prevents startup. Restart the server to apply it. In demo mode, Arena and Benchmark use only this pair, model selectors explain that changes are disabled, and all provider/model/prompt settings are read-only. Saved-request previews still work without inference; model tests and catalog discovery are disabled. The server also rejects other participants, model overrides and settings writes through the API. Existing registrations and credentials stay in SQLite. Unset or empty `DEMO_MODELS` restores normal behavior after restart. This option applies to the web server, not the CLI.
 
 Settings opens directly with no administrator registration, password or setup code. It uses the same access policy as the arena: local access by default, the site login on a password-protected deployment, or anonymous access with `PUBLIC_ACCESS=true`. See [deployment](docs/deployment.md).
 
