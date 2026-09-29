@@ -7,8 +7,9 @@ export const RunConfigSchema = z
       .default(['heuristic', 'random']),
     modelOverrides: z.record(z.string().max(64), z.string().min(1).max(256)).default({}),
     seed: z.string().min(1).max(100).default('1'),
-    maxSeconds: z.number().int().min(1).max(600).default(180),
-    maxTurns: z.number().int().min(1).max(2000).default(500),
+    maxSeconds: z.number().int().min(1).max(600).nullable().default(null),
+    maxTurns: z.number().int().min(1).max(2000).nullable().default(null),
+    decisionStepMs: z.number().int().min(0).max(1000).default(100),
     timeoutMs: z.number().int().min(100).max(120000).default(30000),
     attempts: z.number().int().min(1).max(5).default(3),
   })

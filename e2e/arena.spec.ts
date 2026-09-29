@@ -63,3 +63,53 @@ test('server play survives page navigation and can be stopped after reconnect', 
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.locator('.status')).toHaveText('cancelled');
 });
+
+test('opens the arena when a user follows a link from another site', async ({ page, baseURL }) => {
+  await page.route(`${baseURL}/`, (route) =>
+    route.continue({
+      headers: {
+        ...route.request().headers(),
+        'sec-fetch-site': 'cross-site',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-dest': 'document',
+      },
+    }),
+  );
+  await page.route('https://entry.example/', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: `<a href="${baseURL}/">Open Tetris</a>`,
+    }),
+  );
+  await page.goto('https://entry.example/');
+  const response = page.waitForResponse(
+    (r) => r.url() === `${baseURL}/` && r.request().isNavigationRequest(),
+  );
+  await page.getByRole('link', { name: 'Open Tetris' }).click();
+  const navigation = await response;
+  expect(navigation.status()).toBe(200);
+  await expect(page.getByRole('button', { name: 'Start match' })).toBeEnabled();
+  await expect(page.getByRole('img', { name: /Tetris board/ })).toHaveCount(2);
+});
+
+test('a finished one-turn evaluation does not become the next visitor default', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runs', { data: { mode: 'decision', maxTurns: 1, decisionStepMs: 0 } });
+  await expect
+    .poll(async () => (await (await request.get('/api/state')).json()).snapshot.status)
+    .toBe('finished');
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Start match' })).toBeEnabled();
+  await expect(page.getByLabel('Mode', { exact: true })).toHaveValue('realtime');
+  await expect(page.getByLabel('Run limit')).toHaveValue('');
+  await expect(page.getByLabel('Run limit')).toHaveAttribute('placeholder', 'Unlimited');
+  await page.getByRole('button', { name: 'Start match' }).click();
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled();
+  const current = (await (await request.get('/api/state')).json()).snapshot;
+  expect(current.config.maxSeconds).toBeNull();
+  expect(current.config.maxTurns).toBeNull();
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page.locator('.status')).toHaveText('cancelled');
+});

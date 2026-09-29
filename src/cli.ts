@@ -19,7 +19,7 @@ const { values } = parseArgs({
 });
 if (values.help) {
   console.log(
-    'pnpm bench [--config bench.json] [--connections connections.local.json] [--out results]\nWithout a config: heuristic vs seeded random, 5 seeds, swapped sides, 500 decision turns.',
+    'pnpm bench [--config bench.json] [--connections connections.local.json] [--out results]\nWithout a config: heuristic vs seeded random, 5 seeds, swapped sides, decision mode until top-out (no turn limit).',
   );
   process.exit(0);
 }

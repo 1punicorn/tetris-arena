@@ -12,7 +12,13 @@ import { CandidatePool } from '../src/server/candidates.js';
 const result = (choice: string) => ({ choice, model: 'fixture', provider: 'mock', latencyMs: 1 });
 async function run(seed = 'repro', swapped = false) {
   const players: [string, string] = swapped ? ['random', 'heuristic'] : ['heuristic', 'random'];
-  const config = RunConfigSchema.parse({ mode: 'decision', seed, maxTurns: 12, players });
+  const config = RunConfigSchema.parse({
+    mode: 'decision',
+    seed,
+    maxTurns: 12,
+    players,
+    decisionStepMs: 0,
+  });
   const agent = players.map((id) => createAgent(id, [], seed)) as [DecisionAgent, DecisionAgent];
   return new Promise<Snapshot>((resolve) => {
     new Runner(config, agent, (e) => {
@@ -161,4 +167,81 @@ it('schedules all pairs, seeds and reversed sides and prohibits human evaluation
   expect(runs[1].players).toEqual(['b', 'a']);
   expect(() => RunConfigSchema.parse({ mode: 'decision', players: ['human', 'random'] })).toThrow();
   expect(() => RunConfigSchema.parse({ players: ['human', 'human'] })).toThrow();
+});
+
+it('defaults to unlimited play and finishes on top-out rather than a turn cap', async () => {
+  const config = RunConfigSchema.parse({ mode: 'decision', decisionStepMs: 0, seed: 'unlimited' });
+  expect(config.maxTurns).toBeNull();
+  expect(config.maxSeconds).toBeNull();
+  const completed = await new Promise<Snapshot>((resolve) => {
+    new Runner(
+      config,
+      [createAgent('heuristic', [], config.seed), createAgent('random', [], config.seed)],
+      (event) => {
+        if (event.type === 'state' && event.snapshot.status === 'finished') resolve(event.snapshot);
+      },
+    ).start();
+  });
+  expect(completed.reason).toBe('top_out');
+  expect(completed.turn).toBeGreaterThan(2);
+  expect(completed.winner).not.toBeNull();
+});
+it('publishes legal intermediate movement before locking a decision placement', async () => {
+  const config = RunConfigSchema.parse({
+    mode: 'decision',
+    players: ['heuristic', 'none'],
+    maxTurns: 1,
+    decisionStepMs: 20,
+  });
+  const frames: Snapshot[] = [];
+  const runner = new Runner(
+    config,
+    [createAgent('heuristic', [], '1'), null],
+    (e) => {
+      if (e.type === 'state') frames.push(e.snapshot);
+    },
+    async (game) => {
+      const candidate = buildCandidates(game).find(
+        (c) => !c.uses_hold && Math.abs(c.target.x - game.active!.x) >= 2,
+      );
+      expect(candidate).toBeDefined();
+      return [candidate!];
+    },
+  );
+  const initialX = runner.games[0].active!.x;
+  runner.start();
+  await vi.waitFor(() => expect(runner.status).toBe('finished'), { timeout: 4000 });
+  const moving = frames.filter(
+    (f) =>
+      f.turn === 0 &&
+      f.games[0].board.every((row) => row.every((cell) => cell === null)) &&
+      f.games[0].active?.x !== initialX,
+  );
+  expect(new Set(moving.map((f) => f.games[0].active!.x)).size).toBeGreaterThanOrEqual(2);
+  expect(runner.stats[0].placements).toBe(1);
+  expect(runner.reason).toBe('turn_limit');
+});
+it('animated evaluation preserves the outcome of the same headless decisions', async () => {
+  async function simulate(decisionStepMs: number) {
+    const config = RunConfigSchema.parse({
+      mode: 'decision',
+      maxTurns: 3,
+      decisionStepMs,
+      seed: 'animation-parity',
+    });
+    return new Promise<Snapshot>((resolve) => {
+      new Runner(
+        config,
+        [createAgent('heuristic', [], config.seed), createAgent('random', [], config.seed)],
+        (e) => {
+          if (e.type === 'state' && e.snapshot.status === 'finished') resolve(e.snapshot);
+        },
+      ).start();
+    });
+  }
+  const instant = await simulate(0),
+    animated = await simulate(10);
+  expect(animated.games).toEqual(instant.games);
+  expect(animated.stats.map((s) => s.sent)).toEqual(instant.stats.map((s) => s.sent));
+  expect(animated.stats.map((s) => s.placements)).toEqual([3, 3]);
 });

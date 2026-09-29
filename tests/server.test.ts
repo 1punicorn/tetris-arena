@@ -114,3 +114,67 @@ it('rejects duplicate connections/invalid mode without starting a request', asyn
   expect(response.status).toBe(400);
   expect(manager.runner).toBeNull();
 });
+
+it('requires authentication for public routes, including SSE, without a spoofed local-host bypass', async () => {
+  const { createAccessPolicy } = await import('../src/server/access.js');
+  const { manager } = await setup();
+  const password = 'test-password-only-123';
+  const access = createAccessPolicy(4317, {
+    publicOrigin: 'https://arena.example.com',
+    username: 'owner',
+    password,
+  });
+  const app = createApp(manager, [], 4317, 'connections.local.json', access);
+  for (const path of ['/api/health', '/api/events', '/api/state', '/']) {
+    const response = await app.request(path, { headers: { host: 'arena.example.com' } });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain('Basic');
+  }
+  const authorization = 'Basic ' + Buffer.from(`owner:${password}`).toString('base64');
+  expect(
+    (
+      await app.request('/api/health', {
+        headers: { host: 'arena.example.com', authorization, origin: 'https://arena.example.com' },
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await app.request('/api/health', {
+        headers: { host: 'arena.example.com', authorization, origin: 'https://attacker.test' },
+      })
+    ).status,
+  ).toBe(403);
+  expect((await app.request('/api/health', { headers: { host: '127.0.0.1:4317' } })).status).toBe(
+    401,
+  );
+});
+
+it('accepts an external document navigation but rejects cross-site API requests', async () => {
+  const { app } = await setup();
+  const navigation = {
+    host: '127.0.0.1:4317',
+    'sec-fetch-site': 'cross-site',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-dest': 'document',
+  };
+  const allowed = await app.request('/api/health', { headers: navigation });
+  expect(allowed.status).toBe(200);
+  expect(allowed.headers.get('vary')).toContain('Sec-Fetch-Mode');
+  expect(
+    (
+      await app.request('/api/state', {
+        headers: { ...navigation, 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await app.request('/api/cancel', {
+        method: 'POST',
+        headers: { ...navigation, 'content-type': 'application/json' },
+        body: '{}',
+      })
+    ).status,
+  ).toBe(403);
+});

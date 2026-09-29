@@ -67,6 +67,14 @@ describe('provider protocols', () => {
         Object.keys(problem.options),
       );
       expect(body.messages[1].content).toContain('board');
+      expect(body.messages[0].content).toBe(
+        problem.instruction +
+          ' Return only JSON with one key "choice" containing an offered option ID.',
+      );
+      expect(JSON.parse(body.messages[1].content)).toEqual({
+        state: problem.state,
+        options: problem.options,
+      });
       return { body: completion('{"choice":"option_0"}') };
     });
     const result = await createAgent('local', [profile(url)], '1').decide(
@@ -133,6 +141,7 @@ describe('provider protocols', () => {
       expect(String(input)).toBe('https://openrouter.ai/api/alpha/decisions');
       const request = JSON.parse(init!.body as string);
       expect(request.state).toEqual(problem.state);
+      expect(request.questions.action.instructions).toBe(problem.instruction);
       expect(request.questions.action.criteria).toEqual(problem.options);
       return Response.json({
         model: 'fixture/actual',

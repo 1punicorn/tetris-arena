@@ -35,7 +35,7 @@ pnpm build
 pnpm start
 ```
 
-Run these commands from the repository directory. Configuration, `.env` and `results/` are resolved there. `PORT`, `CONNECTIONS_FILE` and `RESULTS_DIR` can override the local defaults. The server always binds to loopback.
+Run these commands from the repository directory. Configuration, `.env` and `results/` are resolved there. `PORT`, `CONNECTIONS_FILE` and `RESULTS_DIR` can override the local defaults. The server binds to loopback by default. For an HTTPS domain and a persistent service, see [deployment](docs/deployment.md).
 
 ## Connect models
 
@@ -106,7 +106,7 @@ pnpm bench --config bench.example.json
 pnpm bench --config bench.example.json --connections connections.local.json --out results/experiment-1
 ```
 
-The default benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with your profile IDs to use remote or local models. Each pair is run in both seat orders for every seed. The UI's **Paired benchmark** uses the selected mode and limits shown above the arena.
+The example benchmark runs heuristic vs random over five seeds with swapped sides: **10 matches**. Replace `models` with your profile IDs to use remote or local models. Each pair is run in both seat orders for every seed. The UI's **Paired benchmark** uses the selected mode and optional limits shown above the arena. New pages default to real-time unlimited play; completed runs never replace a new visitor's mode or limits.
 
 ```json
 {
@@ -121,9 +121,11 @@ The default benchmark runs heuristic vs random over five seeds with swapped side
 }
 ```
 
-This example schedules **30 matches** and may make many paid calls. Each run is finite; Stop / Ctrl-C cancels active requests and remaining scheduled matches. A single request defaults to 30 seconds. A decision-evaluation turn retries up to three attempts, 500 ms apart, then marks the run failed. Real-time mode retries after 500 ms until top-out, cancellation or its time limit (default 180 seconds). SDK automatic retries are disabled.
+This example schedules **30 matches** and may make many paid calls. Matches have no time or turn limit by default and continue until top-out. The example config explicitly limits evaluation to 500 turns. Stop / Ctrl-C cancels active requests and remaining scheduled matches. A single request defaults to 30 seconds. A decision-evaluation turn retries up to three attempts, 500 ms apart, then marks the run failed. Real-time mode retries after 500 ms until top-out, cancellation or an explicitly configured time limit. SDK automatic retries are disabled.
 
-Run limits: real-time 1–600 seconds; decision evaluation 1–2,000 turns; request timeout 100–120,000 ms; evaluation attempts 1–5. A decision turn can take the timeout multiplied by attempts and players; there is no separate wall-clock limit in decision mode.
+Optional run limits: real-time 1–600 seconds; decision evaluation 1–2,000 turns. Omit them or set them to `null` for unlimited play; clear the limit field in the UI. Other settings: request timeout 100–120,000 ms; evaluation attempts 1–5. A decision turn can take the timeout multiplied by attempts and players; there is no separate wall-clock limit in decision mode.
+
+Decision evaluation also shows movement and rotation before each landing, at 100 ms per input. Both choices are collected first, gravity stays frozen, and attacks still resolve after both placements. `decisionStepMs: 0` skips this visual pacing for fast headless batches; the example CLI config uses it. It does not change board outcomes or provider latency metrics.
 
 ### What the benchmark measures
 
@@ -159,7 +161,7 @@ React UI ── local HTTP / SSE ── Hono coordinator
 CLI ────────────────────────── same coordinator
 ```
 
-A small local server is deliberate: keys never enter the browser, local models avoid browser CORS problems, and tab throttling does not pause the game. Simulation and provider calls live in Node; candidate search runs in worker threads. It is an owner-operated tool, **not a multi-user hosted backend**. Only one match or benchmark runs at a time.
+A small local server is deliberate: keys never enter the browser, local models avoid browser CORS problems, and tab throttling does not pause the game. Simulation and provider calls live in Node; candidate search runs in worker threads. It is an owner-operated tool, **not a multi-user hosted backend**. An explicitly configured HTTPS proxy can expose the shared arena with password protection or an operator-approved anonymous mode; see [deployment](docs/deployment.md). Only one match or benchmark runs at a time.
 
 Source boundaries: `src/core` owns rules, observations and evaluation; `src/providers` owns validated profiles and adapters; `src/server` owns workers, local APIs and artifacts; `src/web` owns presentation. To add a provider, use its official AI SDK adapter or implement `DecisionAgent` and keep choice validation, cancellation, bounds and privacy guarantees. See [contributing](CONTRIBUTING.md).
 

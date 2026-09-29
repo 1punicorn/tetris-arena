@@ -8,14 +8,25 @@ import { loadProfiles } from '../providers/config.js';
 import { Manager } from './manager.js';
 import { Artifacts } from './artifacts.js';
 import { createApp } from './app.js';
+import { createAccessPolicy, REQUEST_VARY } from './access.js';
 
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
   throw new Error('PORT must be 1024..65535');
+const dev = import.meta.url.endsWith('.ts');
+const access = createAccessPolicy(port, {
+  host: process.env.HOST,
+  publicOrigin: process.env.PUBLIC_ORIGIN,
+  publicAccess: process.env.PUBLIC_ACCESS === 'true',
+  username: process.env.PUBLIC_USERNAME,
+  password: process.env.PUBLIC_PASSWORD,
+  trustedProxyIP: process.env.TRUSTED_PROXY_IP,
+});
+if (dev && access.publicHost)
+  throw new Error('Use pnpm build and pnpm start for public deployment');
 const manager = new Manager(new Artifacts(process.env.RESULTS_DIR ?? 'results'));
 const config = process.env.CONNECTIONS_FILE ?? 'connections.local.json';
-const app = createApp(manager, await loadProfiles(config), port, config);
-const dev = import.meta.url.endsWith('.ts');
+const app = createApp(manager, await loadProfiles(config), port, config, access);
 const vite = dev
   ? await (
       await import('vite')
@@ -30,14 +41,22 @@ if (!dev) {
 }
 const api = getRequestListener(app.fetch);
 const server = createServer((req, res) => {
-  // Apply the same host/origin gate to Vite assets, not only APIs.
-  const host = req.headers.host,
-    origin = req.headers.origin;
+  res.setHeader('Vary', REQUEST_VARY);
+  // Protect both application routes and the local Vite development middleware.
   if (
-    ![`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`].includes(host ?? '') ||
-    (origin && origin !== `http://${host}`) ||
-    req.headers['sec-fetch-site'] === 'cross-site'
+    !access.allowsPeer(req.socket.remoteAddress) ||
+    access.checkHeaders(
+      req.headers.host,
+      req.headers.origin,
+      req.headers['sec-fetch-site'] as string | undefined,
+      {
+        method: req.method,
+        mode: req.headers['sec-fetch-mode'] as string | undefined,
+        destination: req.headers['sec-fetch-dest'] as string | undefined,
+      },
+    )
   ) {
+    res.setHeader('Cache-Control', 'no-store');
     res.writeHead(403);
     res.end('Forbidden');
     return;
@@ -45,7 +64,9 @@ const server = createServer((req, res) => {
   if (vite && !req.url?.startsWith('/api/')) vite.middlewares(req, res);
   else void api(req, res);
 });
-server.listen(port, '127.0.0.1', () => console.log(`Tetris AI Bench: http://127.0.0.1:${port}`));
+server.listen(port, access.host, () =>
+  console.log(`Tetris AI Bench: ${process.env.PUBLIC_ORIGIN ?? `http://${access.host}:${port}`}`),
+);
 let closing = false;
 async function close() {
   if (closing) return;

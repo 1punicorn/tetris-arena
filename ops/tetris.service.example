@@ -1,0 +1,21 @@
+[Unit]
+Description=Tetris AI Bench
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/tetris
+# Replace this with the absolute path reported by: command -v node
+ExecStart=/usr/bin/node dist/server/server/main.js
+Environment=NODE_ENV=production
+EnvironmentFile=%h/.config/tetris/service.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

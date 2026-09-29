@@ -78,8 +78,8 @@ function App() {
     [inventories, setInventories] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'realtime' | 'decision'>('realtime'),
     [seed, setSeed] = useState('1'),
-    [limit, setLimit] = useState(180),
-    [turns, setTurns] = useState(500);
+    [limit, setLimit] = useState<number | null>(null),
+    [turns, setTurns] = useState<number | null>(null);
   const [state, setState] = useState<State>({
       snapshot: null,
       progress: { total: 0, completed: 0, active: false },
@@ -138,11 +138,14 @@ function App() {
     const config = state.snapshot?.config;
     if (config) {
       setPlayers(config.players);
-      setMode(config.mode);
-      setSeed(config.seed);
-      setLimit(config.maxSeconds);
-      setTurns(config.maxTurns);
       setOverrides(config.modelOverrides);
+      // A finished run is history, not the next visitor's match configuration.
+      if (state.snapshot?.status !== 'finished') {
+        setMode(config.mode);
+        setSeed(config.seed);
+        setLimit(config.maxSeconds);
+        setTurns(config.maxTurns);
+      }
     }
   }, [state.snapshot?.id]);
   useEffect(() => {
@@ -284,8 +287,13 @@ function App() {
               min="1"
               max={mode === 'realtime' ? 600 : 2000}
               disabled={active}
-              value={mode === 'realtime' ? limit : turns}
-              onChange={(e) => (mode === 'realtime' ? setLimit : setTurns)(Number(e.target.value))}
+              value={(mode === 'realtime' ? limit : turns) ?? ''}
+              placeholder={t('Unlimited', '무제한')}
+              onChange={(e) =>
+                (mode === 'realtime' ? setLimit : setTurns)(
+                  e.target.value === '' ? null : Number(e.target.value),
+                )
+              }
             />
           </label>
           <button

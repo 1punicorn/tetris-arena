@@ -1,4 +1,7 @@
 import { Hono } from 'hono';
+import { basicAuth } from 'hono/basic-auth';
+import { HTTPException } from 'hono/http-exception';
+import { createAccessPolicy, REQUEST_VARY, type AccessPolicy } from './access.js';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
@@ -14,20 +17,39 @@ export function createApp(
   initial: Profile[],
   port: number,
   configFile = 'connections.local.json',
+  access: AccessPolicy = createAccessPolicy(port),
 ) {
   let profiles = initial;
   const app = new Hono();
+  const authenticate = access.needsAuthentication
+    ? basicAuth({
+        username: access.username!,
+        password: access.password!,
+        realm: 'Tetris AI Bench',
+      })
+    : null;
   app.use('*', async (c, next) => {
-    // The server is owner-operated and loopback-only. Block DNS rebinding and cross-origin writes/reads.
-    const host = c.req.header('host');
-    if (![`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host ?? ''))
-      return c.json({ error: 'invalid_host' }, 403);
-    const origin = c.req.header('origin');
-    if (origin && origin !== `http://${host}`) return c.json({ error: 'invalid_origin' }, 403);
-    if (c.req.header('sec-fetch-site') === 'cross-site')
-      return c.json({ error: 'cross_site_request' }, 403);
+    c.header('Vary', REQUEST_VARY);
+    const error = access.checkHeaders(
+      c.req.header('host'),
+      c.req.header('origin'),
+      c.req.header('sec-fetch-site'),
+      {
+        method: c.req.method,
+        mode: c.req.header('sec-fetch-mode'),
+        destination: c.req.header('sec-fetch-dest'),
+      },
+    );
+    if (error) {
+      c.header('Cache-Control', 'no-store');
+      return c.json({ error }, 403);
+    }
     c.header('X-Content-Type-Options', 'nosniff');
     c.header('Referrer-Policy', 'no-referrer');
+    if (authenticate) {
+      c.header('Cache-Control', 'no-store');
+      return authenticate(c, next);
+    }
     await next();
   });
   app.use(
@@ -133,6 +155,7 @@ export function createApp(
     return c.body(data);
   });
   app.onError((error, c) => {
+    if (error instanceof HTTPException && error.status === 401) return error.getResponse();
     const code =
       error instanceof z.ZodError
         ? 'invalid_configuration'

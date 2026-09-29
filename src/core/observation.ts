@@ -1,6 +1,7 @@
 import type { Game } from './engine.js';
 import type { Candidate, DecisionProblem, Landing } from './types.js';
 import { shuffled } from './random.js';
+import { boardMetrics } from './board-analysis.js';
 import { INSTRUCTION, RULES, STRATEGY, LEGEND, ATTACK_RULES } from './policy.js';
 
 function describe(item: Landing) {
@@ -10,6 +11,7 @@ function describe(item: Landing) {
   return `piece=${item.piece} hold=${Number(item.uses_hold)} reserve=${item.hold_after ?? '-'} x=${item.target.x} y=${item.target.y} shape=${item.target.shape.map((r) => r.join('')).join('/')} clear=${item.cleared_lines} attack=${Math.max(0, item.cleared_lines - 1)} holes=${item.holes} height=${item.max_height} sum_height=${item.aggregate_height} roughness=${item.bumpiness} wells=${wells} keys=${item.key_presses}`;
 }
 export function observation(game: Game) {
+  const metrics = boardMetrics(game.board);
   return {
     board: game.board.map((row) =>
       row.map((c) => (c === null ? '.' : c === 'garbage' ? 'G' : c)).join(''),
@@ -18,6 +20,11 @@ export function observation(game: Game) {
     next: game.queue[0] ?? null,
     hold: game.hold,
     can_hold: game.canHold,
+    holes: metrics.holes,
+    height: metrics.max_height,
+    sum_height: metrics.aggregate_height,
+    roughness: metrics.bumpiness,
+    wells: metrics.wells,
     score: game.score,
     lines: game.lines,
     level: game.level,

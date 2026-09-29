@@ -88,17 +88,23 @@ const emptyStats = (): PlayerStats => ({
   actualModel: null,
   provider: null,
 });
-export function applyPlacement(game: Game, placement: Placement, rng: () => number): Game {
+/** The same legal input path drives visible playback and headless evaluation. */
+export function* placementFrames(game: Game, placement: Placement, rng: () => number) {
   let current = game,
     target = { ...placement };
   for (let i = 0; i < 64; i++) {
     const action = placementAction(current, target);
     if (!action) throw new Error('unreachable_placement');
     current = step(current, action, rng);
-    if (action === 'drop') return current;
+    yield { game: current, locked: action === 'drop' };
+    if (action === 'drop') return;
     if (action === 'hold') target = { ...target, uses_hold: false };
   }
   throw new Error('placement_path_limit');
+}
+export function applyPlacement(game: Game, placement: Placement, rng: () => number): Game {
+  for (const frame of placementFrames(game, placement, rng)) if (frame.locked) return frame.game;
+  throw new Error('unreachable_placement');
 }
 /** Resolve both placements first. Neither player observes or is interrupted by the other's move. */
 export function resolveTurn(
@@ -108,6 +114,13 @@ export function resolveTurn(
   garbage: [() => number, () => number],
 ): { games: [Game, Game]; clears: [number, number]; attacks: [number, number] } {
   const next = games.map((g, i) => applyPlacement(g, placements[i], pieces[i])) as [Game, Game];
+  return settleTurn(games, next, garbage);
+}
+function settleTurn(
+  games: [Game, Game],
+  next: [Game, Game],
+  garbage: [() => number, () => number],
+) {
   const clears = next.map((g, i) => g.lines - games[i].lines) as [number, number];
   const attacks = clears.map((c) => Math.max(0, c - 1)) as [number, number];
   return {
@@ -266,7 +279,11 @@ export class Runner {
   }
   private clock() {
     if (this.status !== 'playing') return;
-    if (this.elapsedMs >= this.config.maxSeconds * 1000 && this.config.mode === 'realtime') {
+    if (
+      this.config.maxSeconds !== null &&
+      this.elapsedMs >= this.config.maxSeconds * 1000 &&
+      this.config.mode === 'realtime'
+    ) {
       this.stop('time_limit');
       return;
     }
@@ -391,10 +408,39 @@ export class Runner {
       this.busy[player] = false;
     }
   }
+  private async playPlacements(
+    before: [Game, Game],
+    placements: Placement[],
+  ): Promise<[Game, Game]> {
+    if (this.config.decisionStepMs === 0)
+      return before.map((game, p) =>
+        placements[p] ? applyPlacement(game, placements[p], this.pieces[p]) : game,
+      ) as [Game, Game];
+    const paths = placements.map((placement, p) =>
+      placementFrames(before[p], placement, this.pieces[p]),
+    );
+    const placed: [Game, Game] = [...before];
+    const done = paths.map(() => false);
+    while (done.some((value) => !value)) {
+      this.controller.signal.throwIfAborted();
+      for (let p = 0; p < paths.length; p++) {
+        if (done[p]) continue;
+        const frame = paths[p].next();
+        if (frame.done) throw new Error('unreachable_placement');
+        placed[p] = frame.value.game;
+        done[p] = frame.value.locked;
+      }
+      this.games = [...placed];
+      this.publish();
+      if (done.some((value) => !value))
+        await delay(this.config.decisionStepMs, undefined, { signal: this.controller.signal });
+    }
+    return placed;
+  }
   private async decisionLoop() {
     try {
       while (this.status === 'playing') {
-        if (this.turn >= this.config.maxTurns) {
+        if (this.config.maxTurns !== null && this.turn >= this.config.maxTurns) {
           this.stop('turn_limit');
           break;
         }
@@ -423,18 +469,15 @@ export class Runner {
           placements.push(selected);
         }
         if (this.status !== 'playing') return;
+        const placed = await this.playPlacements(snapshot, placements);
+        if (this.status !== 'playing') return;
         if (this.config.players[1] === 'none') {
-          const before = this.games[0];
-          this.games[0] = applyPlacement(before, placements[0], this.pieces[0]);
+          const before = snapshot[0];
+          this.games = placed;
           this.stats[0].placements++;
           this.stats[0].tetrises += Number(this.games[0].lines - before.lines === 4);
         } else {
-          const result = resolveTurn(
-            snapshot,
-            placements as [Placement, Placement],
-            this.pieces,
-            this.garbage,
-          );
+          const result = settleTurn(snapshot, placed, this.garbage);
           this.games = result.games;
           for (let p = 0; p < 2; p++) {
             this.stats[p].placements++;
