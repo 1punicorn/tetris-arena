@@ -1,0 +1,16 @@
+Tetris AI Bench
+Copyright (c) 2026 hurxxxx. Released under the MIT License.
+
+The game engine, reachable-placement search, assisted candidate generation,
+strategy instructions, and their original regression tests were extracted
+from Open Work Hub, authored by hurxxxx, and adapted for this standalone tool.
+Source revision: d214ffdfb09811ff8c64a4a56e0b3495189b0565
+Source paths: apps/web/src/app-modules/tetris/{engine,ai-placement,ai-candidates}.ts
+and apps/api/src/open_work_hub_api/domains/tetris/ai.py.
+The author has authorized publication of this extracted code under MIT.
+
+This is an independent research/developer project. It is not affiliated with
+or endorsed by The Tetris Company or any model/provider named in examples.
+Tetris and provider/product names belong to their respective owners.
+Third-party packages retain their own licenses; see pnpm-lock.yaml and their
+installed package license files. No third-party artwork or fonts are bundled.

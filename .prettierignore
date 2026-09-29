@@ -1,0 +1,9 @@
+node_modules
+pnpm-lock.yaml
+dist
+results
+.runtime*
+playwright-report
+test-results
+connections.local.json
+.env*

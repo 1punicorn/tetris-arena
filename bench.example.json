@@ -1,0 +1,5 @@
+{
+  "models": ["heuristic", "random"],
+  "seeds": ["1", "2", "3", "4", "5"],
+  "run": { "mode": "decision", "maxTurns": 500, "timeoutMs": 30000, "attempts": 3 }
+}

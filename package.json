@@ -1,0 +1,61 @@
+{
+  "name": "tetris-ai-bench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "A local-first Tetris arena for reproducible decision-model and LLM benchmarks.",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "dev": "tsx src/server/main.ts",
+    "build": "tsc --noEmit && vite build && tsc -p tsconfig.server.json",
+    "start": "node dist/server/server/main.js",
+    "bench": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@ai-sdk/amazon-bedrock": "5.0.100",
+    "@ai-sdk/anthropic": "4.0.68",
+    "@ai-sdk/azure": "4.0.84",
+    "@ai-sdk/google": "4.0.85",
+    "@ai-sdk/google-vertex": "5.0.98",
+    "@ai-sdk/openai": "4.0.80",
+    "@ai-sdk/openai-compatible": "3.0.59",
+    "@hono/node-server": "2.1.1",
+    "ai": "7.0.122",
+    "dotenv": "18.0.4",
+    "hono": "4.13.10",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@types/node": "^24.19.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "5.1.4",
+    "prettier": "3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vite": "7.3.1",
+    "vitest": "^4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hurxxxx/tetris.git"
+  }
+}

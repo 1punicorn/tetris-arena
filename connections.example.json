@@ -1,0 +1,103 @@
+{
+  "connections": [
+    {
+      "id": "jev",
+      "name": "Jev",
+      "provider": "openrouter-decisions",
+      "model": "typesafe/jev-1.13",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "kev",
+      "name": "Kev 4B",
+      "provider": "openrouter-decisions",
+      "model": "jaredpalmer/kev-4b",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "solar",
+      "name": "Solar Decide",
+      "provider": "openrouter-decisions",
+      "model": "upstage/solar-decide",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter LLM",
+      "provider": "openai-compatible",
+      "baseURL": "https://openrouter.ai/api/v1",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "reasoningOffSupported": false,
+      "providerOptions": { "compatible": { "reasoning": { "enabled": false } } }
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "provider": "openai-compatible",
+      "baseURL": "http://127.0.0.1:11434/v1",
+      "model": "REPLACE_WITH_INSTALLED_MODEL",
+      "reasoningOffSupported": false,
+      "providerOptions": { "compatible": { "think": false } }
+    },
+    {
+      "id": "vllm",
+      "name": "vLLM",
+      "provider": "openai-compatible",
+      "baseURL": "http://127.0.0.1:8000/v1",
+      "model": "REPLACE_WITH_SERVED_MODEL",
+      "reasoningOffSupported": false,
+      "providerOptions": { "compatible": { "chat_template_kwargs": { "enable_thinking": false } } }
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "provider": "openai",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "reasoningOffSupported": false
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "provider": "anthropic",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "reasoningOffSupported": false
+    },
+    {
+      "id": "google",
+      "name": "Google Gemini",
+      "provider": "google",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "apiKeyEnv": "GOOGLE_GENERATIVE_AI_API_KEY",
+      "reasoningOffSupported": false
+    },
+    {
+      "id": "azure",
+      "name": "Azure OpenAI",
+      "provider": "azure",
+      "model": "REPLACE_WITH_DEPLOYMENT_NAME",
+      "resourceName": "REPLACE_WITH_RESOURCE",
+      "apiKeyEnv": "AZURE_OPENAI_API_KEY",
+      "reasoningOffSupported": false
+    },
+    {
+      "id": "bedrock",
+      "name": "Amazon Bedrock",
+      "provider": "bedrock",
+      "model": "REPLACE_WITH_MODEL_OR_INFERENCE_PROFILE",
+      "region": "us-east-1",
+      "reasoningOffSupported": false
+    },
+    {
+      "id": "vertex",
+      "name": "Google Vertex",
+      "provider": "vertex",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "project": "REPLACE_WITH_PROJECT",
+      "location": "us-central1",
+      "reasoningOffSupported": false
+    }
+  ]
+}
